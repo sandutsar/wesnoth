@@ -4570,6 +4570,8 @@ game_lua_kernel::game_lua_kernel(game_state & gs, play_controller & pc, reports 
 	lua_setfield(L, -2, "__index");
 	lua_pushcfunction(L, &dispatch<&game_lua_kernel::impl_theme_items_set>);
 	lua_setfield(L, -2, "__newindex");
+	lua_pushliteral(L, "game display");
+	lua_setfield(L, -2, "__metatable");
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "game_display");
 	lua_pop(L, 1);
@@ -5092,15 +5094,16 @@ void game_lua_kernel::mouse_over_hex_callback(const map_location& loc)
 	return;
 }
 
-void game_lua_kernel::select_hex_callback(const map_location& loc)
+void game_lua_kernel::select_hex_callback(map_location& loc)
 {
 	lua_State *L = mState;
 
 	if (!luaW_getglobal(L, "wesnoth", "game_events", "on_mouse_action")) {
 		return;
 	}
+	int ret = lua_gettop(L);
 	lua_push(L, loc.wml_x());
 	lua_push(L, loc.wml_y());
-	luaW_pcall(L, 2, 0, false);
-	return;
+	luaW_pcall(L, 2, 2, false);
+	luaW_tolocation(L, ret, loc);
 }
