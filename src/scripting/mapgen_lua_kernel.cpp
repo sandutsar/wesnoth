@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2014 - 2021
+	Copyright (C) 2014 - 2024
 	by Chris Beck <render787@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -30,8 +30,7 @@
 #include <string>
 #include <functional>
 
-#include "lua/lauxlib.h"
-#include "lua/lua.h"
+#include "lua/wrapper_lauxlib.h"
 #include "scripting/push_check.hpp"
 #include "generators/default_map_generator_job.hpp"
 

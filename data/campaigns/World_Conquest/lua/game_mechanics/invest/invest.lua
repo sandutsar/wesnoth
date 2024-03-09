@@ -8,9 +8,11 @@ function wc2_invest.add_items(side_num, num_items)
 	local items_left = stringx.split(side.variables["wc2.items_left"] or "")
 	local items_available = stringx.split(side.variables["wc2.items"] or "")
 	for j = 1, num_items do
-		local i = mathx.random(#items_left)
-		table.insert(items_available, items_left[i])
-		table.remove(items_left, i)
+		if #items_left > 0 then
+			local i = mathx.random(#items_left)
+			table.insert(items_available, items_left[i])
+			table.remove(items_left, i)
+		end
 	end
 
 	side.variables["wc2.items_left"] = table.concat(items_left, ",")
@@ -38,7 +40,7 @@ function wc2_invest.initialize()
 				side.variables["wc2.items_left"] = table.concat(all_items, ",")
 				wc2_invest.add_items(side_num, 9)
 			else
-				wc2_invest.add_items(side_num, 1)				
+				wc2_invest.add_items(side_num, 1)
 			end
 		end
 	end
@@ -59,7 +61,7 @@ function wc2_invest.do_gold()
 	local side = wesnoth.sides[side_num]
 	local leaders = wesnoth.units.find_on_map { side = side_num, canrecruit = true }
 	side.gold = side.gold + 70
-	wesnoth.wml_actions.wc2_map_supply_village { 
+	wesnoth.wml_actions.wc2_map_supply_village {
 		x = leaders[1].x,
 		y = leaders[1].y
 	}
@@ -103,7 +105,7 @@ function wc2_invest.do_hero(t, is_local)
 		side.variables["wc2.heroes"] = table.concat(heroes_available, ",")
 		wc2_heroes.place(t, side_num, x, y, false)
 	end
-	
+
 end
 
 function wc2_invest.do_training(t)
@@ -116,7 +118,7 @@ function wc2_invest.do_item(t)
 	local side = wesnoth.sides[side_num]
 	local leaders = wesnoth.units.find_on_map { side = side_num, canrecruit = true }
 	local x,y = leaders[1].x, leaders[1].y
-	
+
 	local items_available = stringx.split(side.variables["wc2.items"] or "")
 	local i = find_index(items_available, tostring(t))
 	if i == nil then
@@ -166,7 +168,7 @@ function wc2_invest.invest()
 			error("wc2 invest: invalid pick , pick='" .. tostring(res.pick) .. "'.")
 		end
 	end
-	
+
 end
 
 function wesnoth.wml_actions.wc2_invest(cfg)

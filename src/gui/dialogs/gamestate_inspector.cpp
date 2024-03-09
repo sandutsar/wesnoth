@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2009 - 2021
+	Copyright (C) 2009 - 2024
 	by Yurii Chernyi <terraninfo@terraninfo.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -34,6 +34,7 @@
 
 #include "game_board.hpp"
 #include "game_data.hpp"
+#include "gettext.hpp"
 #include "recall_list_manager.hpp"
 #include "team.hpp"
 #include "units/unit.hpp"
@@ -42,6 +43,7 @@
 
 #include "display_context.hpp"
 #include "filter_context.hpp"
+#include "video.hpp"
 
 #include <vector>
 #include <functional>
@@ -91,6 +93,7 @@ public:
 	void clear_data()
 	{
 		data.clear();
+		pages.clear();
 	}
 
 	void set_data(const std::string& new_data)
@@ -109,17 +112,24 @@ private:
 	{
 		pages.clear();
 		std::size_t start = 0;
-		while(start < data.size()) {
-			std::size_t end = data.find_last_of('\n', start + max_inspect_win_len);
-			if(end == std::string::npos) {
-				end = data.size() - 1;
+		while(start + page_characters < data.size()) {
+			// This could search into data that's already on a previous page, which is why the result
+			// is then checked for end < start.
+			std::size_t end = data.find_last_of('\n', start + page_characters);
+			int len;
+			if(end == std::string::npos || end < start) {
+				len = page_characters;
+			} else {
+				len = end - start + 1;
 			}
-			int len = end - start + 1;
 			pages.emplace_back(start, len);
 			start += len;
 		}
+		if(start < data.size()) {
+			pages.emplace_back(start, data.size() - start);
+		}
 	}
-	static const unsigned int max_inspect_win_len = 20000;
+	unsigned int page_characters = 10000 / video::get_pixel_scale();
 	std::string data;
 	std::vector<std::pair<std::size_t,int>> pages;
 };
@@ -140,7 +150,7 @@ public:
 
 	stuff_list_adder& widget(const std::string& ref, const std::string& label, bool markup = false)
 	{
-		string_map& item = data_[ref];
+		widget_item& item = data_[ref];
 		item["label"] = label;
 		item["use_markup"] = utils::bool_string(markup);
 		return *this;
@@ -149,7 +159,7 @@ public:
 private:
 	tree_view_node& stuff_list_;
 	const std::string defn_;
-	std::map<std::string, string_map> data_;
+	widget_data data_;
 };
 
 class gamestate_inspector::view
@@ -489,7 +499,7 @@ const display_context& single_mode_controller::dc() const {
 event_mode_controller::event_mode_controller(gamestate_inspector::controller& c)
 	: single_mode_controller(c)
 {
-	single_mode_controller::events().write_events(events);
+	single_mode_controller::events().write_events(events, true);
 }
 
 void variable_mode_controller::show_list(tree_view_node& node)
@@ -542,7 +552,7 @@ void variable_mode_controller::show_array(tree_view_node& node)
 		std::size_t n_start = var.find_last_of('[') + 1;
 		std::size_t n_len = var.size() - n_start - 1;
 		int n = std::stoi(var.substr(n_start, n_len));
-		model().set_data(config_to_string(vars().child(var.substr(1, n_start - 3), n)));
+		model().set_data(config_to_string(vars().mandatory_child(var.substr(1, n_start - 3), n)));
 	}
 }
 
@@ -577,7 +587,7 @@ void event_mode_controller::show_list(tree_view_node& node, bool is_wmi)
 void event_mode_controller::show_event(tree_view_node& node, bool is_wmi)
 {
 	int n = node.describe_path().back();
-	model().set_data(config_to_string(events.child(is_wmi ? "menu_item" : "event", n)));
+	model().set_data(config_to_string(events.mandatory_child(is_wmi ? "menu_item" : "event", n)));
 }
 
 static stuff_list_adder add_unit_entry(stuff_list_adder& progress, const unit& u, const display_context& dc)
@@ -697,7 +707,7 @@ void unit_mode_controller::show_array(tree_view_node& node)
 		std::size_t n_start = var.find_last_of('[') + 1;
 		std::size_t n_len = var.size() - n_start - 1;
 		int n = std::stoi(var.substr(n_start, n_len));
-		model().set_data(config_to_string(u->variables().child(var.substr(1, n_start - 3), n)));
+		model().set_data(config_to_string(u->variables().mandatory_child(var.substr(1, n_start - 3), n)));
 	}
 }
 
@@ -899,14 +909,15 @@ void team_mode_controller::show_array(tree_view_node& node, int side)
 		std::size_t n_start = var.find_last_of('[') + 1;
 		std::size_t n_len = var.size() - n_start - 1;
 		int n = std::stoi(var.substr(n_start, n_len));
-		model().set_data(config_to_string(t.variables().child(var.substr(1, n_start - 3), n)));
+		model().set_data(config_to_string(t.variables().mandatory_child(var.substr(1, n_start - 3), n)));
 	}
 }
 
 REGISTER_DIALOG(gamestate_inspector)
 
 gamestate_inspector::gamestate_inspector(const config& vars, const game_events::manager& events, const display_context& dc, const std::string& title)
-	: title_(title)
+	: modal_dialog(window_id())
+	, title_(title)
 	, vars_(vars)
 	, events_(events)
 	, dc_(dc)

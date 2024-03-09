@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -16,12 +16,9 @@
 #pragma once
 
 #include "gui/core/widget_definition.hpp"
-#include "gui/core/window_builder.hpp"
 #include "gui/dialogs/drop_down_menu.hpp"
 #include "gui/widgets/styled_widget.hpp"
 #include "gui/widgets/selectable_item.hpp"
-
-class config;
 
 namespace gui2
 {
@@ -174,8 +171,6 @@ struct menu_button_definition : public styled_widget_definition
 
 // }---------- BUILDER -----------{
 
-class styled_widget;
-
 namespace implementation
 {
 
@@ -186,7 +181,7 @@ public:
 
 	using builder_styled_widget::build;
 
-	virtual widget* build() const override;
+	virtual std::unique_ptr<widget> build() const override;
 
 private:
 	std::vector<::config> options_;

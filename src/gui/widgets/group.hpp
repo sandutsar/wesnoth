@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
 	This program is free software; you can redistribute it and/or modify
@@ -45,7 +45,7 @@ public:
 		std::tie(std::ignore, success) = members_.emplace(value, w);
 
 		if(!success) {
-			ERR_GUI_G << "Group member with value already exists." << std::endl;
+			ERR_GUI_G << "Group member with value already exists.";
 			return;
 		}
 

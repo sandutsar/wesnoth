@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2003 - 2021
+	Copyright (C) 2003 - 2024
 	by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -34,15 +34,9 @@
 #include <climits>
 #include <ctime>
 #include <iosfwd>
-#include <iterator>
-#include <map>
 #include <string>
-#include <utility>
 #include <vector>
 #include <type_traits>
-#include <memory>
-
-class enum_tag;
 
 /**
  * Variant for storing WML attributes.
@@ -138,15 +132,12 @@ public:
 	// String assignments:
 	config_attribute_value& operator=(const char *v) { return operator=(std::string(v)); }
 	config_attribute_value& operator=(const std::string &v);
+	config_attribute_value& operator=(const std::string_view &v);
 	config_attribute_value& operator=(const t_string &v);
-	template<typename T>
-	std::enable_if_t<std::is_base_of_v<enum_tag, T>, config_attribute_value&> operator=(const T &v)
-	{
-		return operator=(T::enum_to_string(v));
-	}
 
 	/** Calls @ref operator=(const std::string&) if @a v is not empty. */
 	void write_if_not_empty(const std::string& v);
+	void write_if_not_empty(const t_string& v);
 
 	// Extracting as a specific type:
 	bool to_bool(bool def = false) const;
@@ -158,16 +149,6 @@ public:
 	double to_double(double def = 0.) const;
 	std::string str(const std::string& fallback = "") const;
 	t_string t_str() const;
-	/**
-		@tparam T a type created with MAKE_ENUM macro
-		NOTE: since T::VALUE constants is not of type T but of the underlying enum type you must specify the template parameter explicitly
-		TODO: Fix this in c++11 using constexpr types.
-	*/
-	template<typename T>
-	std::enable_if_t<std::is_base_of_v<enum_tag, T>, T> to_enum(const T &v) const
-	{
-		return T::string_to_enum(this->str(), v);
-	}
 
 	// Implicit conversions:
 	operator int() const { return to_int(); }

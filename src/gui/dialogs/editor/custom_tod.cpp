@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -57,7 +57,8 @@ static custom_tod::string_pair tod_getter_sound(const time_of_day& tod)
 REGISTER_DIALOG(custom_tod)
 
 custom_tod::custom_tod(const std::vector<time_of_day>& times, int current_time)
-	: times_(times)
+	: modal_dialog(window_id())
+	, times_(times)
 	, current_tod_(current_time)
 	, color_field_r_(register_integer("tod_red",   true))
 	, color_field_g_(register_integer("tod_green", true))
@@ -78,6 +79,7 @@ void custom_tod::pre_show(window& window)
 	};
 
 	window.add_to_tab_order(find_widget<text_box>(&window, "tod_name", false, true));
+	window.add_to_tab_order(find_widget<text_box>(&window, "tod_desc", false, true));
 	window.add_to_tab_order(find_widget<text_box>(&window, "tod_id", false, true));
 
 	for(const auto& data : metadata_stuff) {
@@ -122,21 +124,25 @@ void custom_tod::pre_show(window& window)
 			find_widget<button>(&window, "delete", false),
 			std::bind(&custom_tod::do_delete_tod, this));
 
+	connect_signal_mouse_left_click(
+			find_widget<button>(&window, "preview", false),
+			std::bind(&custom_tod::preview_schedule, this));
+
 	connect_signal_notify_modified(
 			find_widget<slider>(&window, "lawful_bonus", false),
 			std::bind(&custom_tod::update_lawful_bonus, this));
 
 	connect_signal_notify_modified(
 			*(color_field_r_->get_widget()),
-			std::bind(&custom_tod::color_slider_callback, this));
+			std::bind(&custom_tod::color_slider_callback, this, COLOR_R));
 
 	connect_signal_notify_modified(
 			*(color_field_g_->get_widget()),
-			std::bind(&custom_tod::color_slider_callback, this));
+			std::bind(&custom_tod::color_slider_callback, this, COLOR_G));
 
 	connect_signal_notify_modified(
 			*(color_field_b_->get_widget()),
-			std::bind(&custom_tod::color_slider_callback, this));
+			std::bind(&custom_tod::color_slider_callback, this, COLOR_B));
 
 	update_selected_tod_info();
 }
@@ -218,13 +224,22 @@ const time_of_day& custom_tod::get_selected_tod() const
 	}
 }
 
-void custom_tod::color_slider_callback()
+void custom_tod::color_slider_callback(COLOR_TYPE type)
 {
 	time_of_day& current_tod = times_[current_tod_];
 
-	current_tod.color.r = color_field_r_->get_widget_value(*get_window());
-	current_tod.color.g = color_field_g_->get_widget_value(*get_window());
-	current_tod.color.b = color_field_b_->get_widget_value(*get_window());
+	switch(type)
+	{
+	case COLOR_R:
+		current_tod.color.r = color_field_r_->get_widget_value();
+		break;
+	case COLOR_G :
+		current_tod.color.g = color_field_g_->get_widget_value();
+		break;
+	case COLOR_B :
+		current_tod.color.b = color_field_b_->get_widget_value();
+		break;
+	}
 
 	update_tod_display();
 }
@@ -234,30 +249,11 @@ void custom_tod::update_tod_display()
 	display* disp = display::get_singleton();
 	assert(disp && "Display pointer is null!");
 
-	// Prevent a floating slice of window appearing alone over the
-	// theme UI sidebar after redrawing tiles and before we have a
-	// chance to redraw the rest of this window.
-	get_window()->undraw();
-
-	// NOTE: We only really want to re-render the gamemap tiles here.
-	// Redrawing everything is a significantly more expensive task.
-	// At this time, tiles are the only elements on which ToD tint is
-	// meant to have a visible effect. This is very strongly tied to
-	// the image caching mechanism.
-	//
-	// If this ceases to be the case in the future, you'll need to call
-	// redraw_everything() instead.
-
+	// The display handles invaliding whatever tiles need invalidating.
 	disp->update_tod(&get_selected_tod());
 
-	// invalidate all tiles so they are redrawn with the new ToD tint next
-	disp->invalidate_all();
-
-	// redraw tiles
-	disp->draw(false);
-
 	// NOTE: revert to invalidate_layout if necessary to display the ToD mask image.
-	get_window()->set_is_dirty(true);
+	get_window()->queue_redraw();
 }
 
 void custom_tod::update_lawful_bonus()
@@ -270,6 +266,7 @@ void custom_tod::update_selected_tod_info()
 	const time_of_day& current_tod = get_selected_tod();
 
 	find_widget<text_box>(get_window(), "tod_name", false).set_value(current_tod.name);
+	find_widget<text_box>(get_window(), "tod_desc", false).set_value(current_tod.description);
 	find_widget<text_box>(get_window(), "tod_id", false).set_value(current_tod.id);
 
 	find_widget<text_box>(get_window(), "path_image", false).set_value(current_tod.image);
@@ -281,9 +278,9 @@ void custom_tod::update_selected_tod_info()
 
 	find_widget<slider>(get_window(), "lawful_bonus", false).set_value(current_tod.lawful_bonus);
 
-	color_field_r_->set_widget_value(*get_window(), current_tod.color.r);
-	color_field_g_->set_widget_value(*get_window(), current_tod.color.g);
-	color_field_b_->set_widget_value(*get_window(), current_tod.color.b);
+	color_field_r_->set_widget_value(current_tod.color.r);
+	color_field_g_->set_widget_value(current_tod.color.g);
+	color_field_b_->set_widget_value(current_tod.color.b);
 
 	const std::string new_index_str = formatter() << (current_tod_ + 1) << "/" << times_.size();
 	find_widget<label>(get_window(), "tod_number", false).set_label(new_index_str);
@@ -296,13 +293,44 @@ void custom_tod::copy_to_clipboard_callback(tod_attribute_getter getter)
 	desktop::clipboard::copy_to_clipboard(getter(get_selected_tod()).second, false);
 }
 
+/** Quickly preview the schedule changes and color */
+void custom_tod::preview_schedule()
+{
+	update_map_and_schedule_(times_);
+}
+
+void custom_tod::update_schedule()
+{
+	/* Update times_ with values from the dialog */
+	times_[current_tod_].name = find_widget<text_box>(get_window(), "tod_name", false).get_value();
+	times_[current_tod_].description = find_widget<text_box>(get_window(), "tod_desc", false).get_value();
+	times_[current_tod_].id = find_widget<text_box>(get_window(), "tod_id", false).get_value();
+
+	times_[current_tod_].image = find_widget<text_box>(get_window(), "path_image", false).get_value();
+	times_[current_tod_].image_mask = find_widget<text_box>(get_window(), "path_mask", false).get_value();
+	times_[current_tod_].sounds = find_widget<text_box>(get_window(), "path_sound", false).get_value();
+
+	times_[current_tod_].lawful_bonus = find_widget<slider>(get_window(), "lawful_bonus", false).get_value();
+
+	times_[current_tod_].color.r = color_field_r_->get_widget_value();
+	times_[current_tod_].color.g = color_field_g_->get_widget_value();
+	times_[current_tod_].color.b = color_field_b_->get_widget_value();
+}
+
+const std::vector<time_of_day> custom_tod::get_schedule()
+{
+	update_schedule();
+	return times_;
+}
+
+void custom_tod::register_callback(std::function<void(std::vector<time_of_day>)> update_func)
+{
+	update_map_and_schedule_ = update_func;
+}
+
 void custom_tod::post_show(window& /*window*/)
 {
 	update_tod_display();
-
-	if(get_retval() == retval::OK) {
-		// TODO: save ToD
-	}
 }
 
 } // namespace dialogs

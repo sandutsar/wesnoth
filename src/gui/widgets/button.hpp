@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -16,7 +16,6 @@
 #pragma once
 
 #include "gui/core/widget_definition.hpp"
-#include "gui/core/window_builder.hpp"
 
 #include "gui/widgets/styled_widget.hpp"
 #include "gui/widgets/clickable_item.hpp"
@@ -50,13 +49,13 @@ public:
 	virtual unsigned get_state() const override;
 
 	/** Inherited from clickable_item. */
-	virtual void connect_click_handler(const event::signal_function& signal) override
+	virtual void connect_click_handler(const event::signal& signal) override
 	{
 		connect_signal_mouse_left_click(*this, signal);
 	}
 
 	/** Inherited from clickable_item. */
-	virtual void disconnect_click_handler(const event::signal_function& signal) override
+	virtual void disconnect_click_handler(const event::signal& signal) override
 	{
 		disconnect_signal_mouse_left_click(*this, signal);
 	}
@@ -136,8 +135,6 @@ struct button_definition : public styled_widget_definition
 
 // }---------- BUILDER -----------{
 
-class styled_widget;
-
 namespace implementation
 {
 
@@ -148,7 +145,7 @@ public:
 
 	using builder_styled_widget::build;
 
-	virtual widget* build() const override;
+	virtual std::unique_ptr<widget> build() const override;
 
 private:
 	std::string retval_id_;

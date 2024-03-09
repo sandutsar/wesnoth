@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2009 - 2021
+	Copyright (C) 2009 - 2024
 	by Guillaume Melquiond <guillaume.melquiond@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -25,8 +25,7 @@
 #include "scripting/push_check.hpp"
 
 
-#include "lua/lauxlib.h"
-#include "lua/lua.h"                    // for lua_State, lua_settop, etc
+#include "lua/wrapper_lauxlib.h"
 
 #include <type_traits>
 
@@ -198,6 +197,8 @@ namespace lua_widget {
 		lua_setfield(L, -2, "__index");
 		lua_pushcfunction(L, lua_widget::impl_widget_set);
 		lua_setfield(L, -2, "__newindex");
+		lua_pushcfunction(L, lua_widget::impl_widget_dir);
+		lua_setfield(L, -2, "__dir");
 		lua_pushcfunction(L, impl_widget_collect);
 		lua_setfield(L, -2, "__gc");
 		lua_pushstring(L, widgetKey);

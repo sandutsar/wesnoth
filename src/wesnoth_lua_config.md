@@ -1,15 +1,13 @@
 # Lua for Wesnoth
 
-This document describes the process used to install Lua 5.4.2 for Wesnoth.
+This document describes the process used to install Lua 5.4.4 for Wesnoth. The external repository pointed to by the lua submodule is located https://github.com/lua/lua.
 
 The goal of this process was, as much as possible, install clean, unchanged sources.
 Traditionally, Wesnoth maintainers have made changes directly to the Lua source kit.
-__This is strongly discouraged.__
+__This is no longer allowed, to remain compatible with using system copies of Lua.__
 Future maintainers should strive, as much as possible, to follow a similar process.
 
 The process, below, involves a number of separate commits; this makes the upgrade history easier to follow.
-The primary commit, after replacing the sources, is usually unreadable since it contains thousands of changes.
-Separating the supporting commits makes them easier to find, and read.
 
 Future maintainers are expected to update this document as appropriate.
 
@@ -21,61 +19,48 @@ And be sure you are working in a private branch.
         $ cd ~/wesnoth
         $ git checkout master
         $ git pull --rebase upstream master
-        $ git checkout -b Upgrade_to_Lua-5.4.2
+        $ git checkout -b Upgrade_to_Lua-5.4.4
 
-## 2) Update Lua Source
+## 2) Update CMake Modules
 
-Download the current source kit from [the Lua maintainers](http://www.lua.org).
-For Lua 5.4.2, this was <http://www.lua.org/ftp/lua-5.4.2.tar.gz>.
-The following presumes you are working on Unix.
-Windows is a bit more work, but generally follows the same process.
+Download new versions of <https://gitlab.kitware.com/cmake/cmake/-/raw/master/Modules/FindPackageMessage.cmake> and <https://gitlab.kitware.com/cmake/cmake/-/raw/master/Modules/FindPackageHandleStandardArgs.cmake> to cmake/.
 
-        $ cd ~
-        $ wget http://www.lua.org/ftp/lua-5.4.2.tar.gz
+Commit the changes:
 
-Unpack into your home folder.
+        $ git add cmake/
+        $ git commit -m 'Update FindLua.cmake and dependencies'
 
-        $ tar -zxf lua-5.4.2.tar.gz
+Update cmake/FindLua.cmake from <https://gitlab.kitware.com/cmake/cmake/-/raw/master/Modules/FindLua.cmake> and cherry pick the Wesnoth commit "Modify FindLua.cmake to find Lua compiled as C++".
 
-Change into the Lua source folder.
+## 3) Update Lua Source
 
-        $ cd ~/lua-5.4.2/src
+From the repository root, change directory to the lua submodule, and checkout version 5.4.4:
 
-We do not need, or want, the Lua command line interpreter, the Lua compiler or the Makefile, so delete them.
-We compile using C++ so cannot allow the use of "C" linkage from the provided header.
-And we initialize the Lua runtime and do not want to allow the provided initialization routine.
+        $ cd src/modules/lua
+        $ git checkout tags/v5.4.4
 
-        $ rm lua.c luac.c Makefile lua.hpp linit.c
+## 4) Update SCons, CMake, and CI
 
-Wesnoth requires all Lua sources to be compiled using C++.
-To ensure  this, rather than depend upon compiler flags, rename the files.
+In CMakeLists.txt, update `set(Lua_FIND_VERSION_MAJOR 5)` and `set(Lua_FIND_VERSION_MINOR 4)`. In SConstruct, update `lua_ver = "5.4"` (i.e. "MAJOR.MINOR").
 
-        $ for FILENAME in *.c; do mv "$FILENAME" "`basename $FILENAME .c`.cpp"; done
-
-Delete the entire Lua source from Wesnoth.
-Be careful not to delete the `COPYRIGHT` file.
-After removing the old sources, this should be the only file remaining.
-
-        $ rm ~/wesnoth/src/lua/*.h
-        $ rm ~/wesnoth/src/lua/*.hpp
-        $ rm ~/wesnoth/src/lua/*.cpp
-
-Copy in the new Lua source kit.
-
-        $ cp *.h ~/wesnoth/src/lua/
-        $ cp *.hpp ~/wesnoth/src/lua/
-        $ cp *.cpp ~/wesnoth/src/lua/
-
-## 3) Change the COPYRIGHT file
-
-The official copyright notice appears at the end of the `lua.h` header.
-Replace the copyright notice in the `COPYRIGHT` file.
-
-## 4) Update SCons and CMake
+In .github/workflows/codeql.yml and utils/dockerbuilds/CI/Dockerfile-base-2204-master, update `liblua5.4-dev`.
 
 Remember to review the source kit for added and removed files, and change the SCons and CMake configuration, as needed.
 Both build systems' build lists are in `~/wesnoth/source_lists/lua`.
-Verify the files listed match the C++ source files just copied in; order is not important, headers are not listed.
+Verify the files listed match the C source files in the submodule; order is not important, headers are not listed.
+
+**DO NOT** add any of the following files to the lua source_list:
+- lua.c
+- luac.c
+- linit.c
+- onelua.c
+- ltests.c
+
+We do not need, or want, the Lua command line interpreter or the Lua compiler.
+
+We initialize the Lua runtime and do not want to allow the provided initialization routine.
+
+We do not need to run lua's test suite.
 
 Updating the project files for other target platforms is optional at this point.
 
@@ -83,18 +68,9 @@ Updating the project files for other target platforms is optional at this point.
 
         $ cd ~/wesnoth
         $ git add .
-        $ git commit -m 'Upgrade to Lua 5.4.2'
+        $ git commit -m 'Upgrade to Lua 5.4.4'
 
-## 6) Apply official patches
-
-Often there will be patches available against the Lua release.
-Generally, these can be applied using `patch`, but obtaining clean patch files takes some looking.
-Hand-applying the patches may be easier.
-The patches can be [viewed online](http://www.lua.org/bugs.html).
-
-__Apply each patch as a separate commit.__
-
-## 7) Update Wesnoth Lua runtime support
+## 6) Update Wesnoth Lua runtime support
 
 Sometimes Lua adds and removes libraries.
 `~/src/scripting/lua_kernel_base.cpp` contains the table to add libraries to the Lua run-time.
@@ -107,15 +83,7 @@ Carefully review the functions, paying particular attention to those listed whic
 
 __Apply these changes as a separate commit.__
 
-## 8) Update Wesnoth Lua runtime options
-
-Review `~/wesnoth/src/wesnoth_lua_config.h` to enable optional features.
-Note that these features only effect the Lua run-time.
-Optional features will __NOT__ be available to the Wesnoth C++ source.
-
-__Apply these changes as a separate commit.__
-
-## 9) Build Wesnoth
+## 7) Build Wesnoth
 
 Run a test build.
 Often, when upgrading Lua, there are changes to the API.
@@ -124,14 +92,14 @@ Make any adjustments necessary.
 
 __Separately commit these adjustments.__
 
-## 10) Check Mainline
+## 8) Check Mainline
 
 Finally, read the Lua manual section on incompatibilities with older versions.
 Be sure to check all mainline Lua modules to ensure any deprecated or removed Lua functions are updated.
 
 __Commit any changes needed.__
 
-## 11) Create a Pull Request
+## 9) Create a Pull Request
 
 Even if you have direct access to the Wesnoth master repository, you should __never upgrade Lua immediately__.
 Push your local branch up to GitHub and create a Pull Request.

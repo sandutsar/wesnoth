@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2012 - 2021
+	Copyright (C) 2012 - 2024
 	by Boldizsár Lipka <lipkab@zoho.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -19,7 +19,6 @@
 #include <vector>
 #include "config.hpp"
 #include "gettext.hpp"
-#include "utils/make_enum.hpp"
 
 class game_config_view;
 
@@ -36,11 +35,6 @@ enum component_type
 	MODIFICATION
 };
 
-MAKE_ENUM(component_availability,
-	(SP, "sp")
-	(MP, "mp")
-	(HYBRID, "hybrid")
-);
 /**
  * Note to all triers:
  * It's not guaranteed that the specified component will be selected
@@ -85,11 +79,11 @@ public:
 	/**
 	 * Tries to enable/disable a specific modification
 	 *
-	 * @param index     the index of the modification
+	 * @param id        the id of the modification
 	 * @param activate  activate or deactivate
 	 * @param force     whether to skip dependency check
 	 */
-	void try_modification_by_index(int index, bool activate, bool force = false);
+	void try_modification_by_id(const std::string& id, bool activate, bool force = false);
 
 	/**
 	 * Tries to set the selected era

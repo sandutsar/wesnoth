@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
 	This program is free software; you can redistribute it and/or modify
@@ -18,6 +18,7 @@
 
 #include "ai/configuration.hpp"
 #include "chat_log.hpp"
+#include "formula/string_utils.hpp"
 #include "font/text_formatting.hpp"
 #include "formatter.hpp"
 #include "game_config.hpp"
@@ -48,7 +49,8 @@ namespace gui2::dialogs
 REGISTER_DIALOG(mp_staging)
 
 mp_staging::mp_staging(ng::connect_engine& connect_engine, wesnothd_connection* connection)
-	: connect_engine_(connect_engine)
+	: modal_dialog(window_id())
+	, connect_engine_(connect_engine)
 	, ai_algorithms_(ai::configuration::get_available_ais())
 	, network_connection_(connection)
 	, update_timer_(0)
@@ -74,6 +76,18 @@ void mp_staging::pre_show(window& window)
 {
 	window.set_enter_disabled(true);
 	window.set_escape_disabled(true);
+
+	// Ctrl+G triggers 'I'm Ready' (ok) button's functionality
+	connect_signal<event::SDL_KEY_DOWN>(std::bind(
+		&mp_staging::signal_handler_sdl_key_down, this, std::placeholders::_2, std::placeholders::_3, std::placeholders::_5, std::placeholders::_6));
+	std::stringstream tooltip;
+    tooltip << vgettext_impl("wesnoth", "Hotkey(s): ",  {{}});
+    #ifdef __APPLE__
+        tooltip << "cmd+g";
+    #else
+        tooltip << "ctrl+g";
+    #endif
+	find_widget<button>(get_window(), "ok", false).set_tooltip(tooltip.str());
 
 	//
 	// Set title and status widget states
@@ -136,7 +150,7 @@ int mp_staging::get_side_node_position(ng::side_engine_ptr side) const
 template<typename... T>
 tree_view_node& mp_staging::add_side_to_team_node(ng::side_engine_ptr side, T&&... params)
 {
-	static const std::map<std::string, string_map> empty_map;
+	static const widget_data empty_map;
 
 	// If there is no team node in the map, this will return nullptr
 	tree_view_node* team_node = team_tree_map_[side->team_name()];
@@ -145,8 +159,8 @@ tree_view_node& mp_staging::add_side_to_team_node(ng::side_engine_ptr side, T&&.
 	if(team_node == nullptr) {
 		tree_view& tree = find_widget<tree_view>(get_window(), "side_list", false);
 
-		std::map<std::string, string_map> tree_data;
-		string_map tree_item;
+		widget_data tree_data;
+		widget_item tree_item;
 
 		tree_item["label"] = side->user_team_name();
 		tree_data.emplace("tree_view_node_label", tree_item);
@@ -163,8 +177,8 @@ tree_view_node& mp_staging::add_side_to_team_node(ng::side_engine_ptr side, T&&.
 
 void mp_staging::add_side_node(ng::side_engine_ptr side)
 {
-	std::map<std::string, string_map> data;
-	string_map item;
+	widget_data data;
+	widget_item item;
 
 	item["label"] = std::to_string(side->index() + 1);
 	data.emplace("side_number", item);
@@ -193,7 +207,7 @@ void mp_staging::add_side_node(ng::side_engine_ptr side)
 	const bool lock_team   = side->cfg()["team_lock"].to_bool(fls);
 	const bool lock_color  = side->cfg()["color_lock"].to_bool(fls);
 
-	const bool saved_game = connect_engine_.params().saved_game == mp_game_settings::SAVED_GAME_MODE::MIDGAME;
+	const bool saved_game = connect_engine_.params().saved_game == saved_game_mode::type::midgame;
 
 	//
 	// AI Algorithm
@@ -566,6 +580,28 @@ void mp_staging::network_handler()
 	}
 
 	state_changed_ = false;
+}
+
+void mp_staging::signal_handler_sdl_key_down(const event::ui_event /*event*/,
+										 bool& handled,
+										 const SDL_Keycode key,
+										 SDL_Keymod modifier)
+{
+    handled = true;
+
+    #ifdef __APPLE__
+        // Idiomatic modifier key in macOS computers.
+        const SDL_Keycode modifier_key = KMOD_GUI;
+    #else
+        // Idiomatic modifier key in Microsoft desktop environments. Common in
+        // GNU/Linux as well, to some extent.
+        const SDL_Keycode modifier_key = KMOD_CTRL;
+    #endif
+
+    if ((key == SDLK_g) && (modifier & modifier_key)) {
+        get_window()->set_retval(retval::OK);
+        return;
+    }
 }
 
 void mp_staging::post_show(window& window)

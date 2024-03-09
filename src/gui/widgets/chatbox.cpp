@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2016 - 2021
+	Copyright (C) 2016 - 2024
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
 	This program is free software; you can redistribute it and/or modify
@@ -20,11 +20,9 @@
 #include "gui/core/register_widget.hpp"
 #include "gui/widgets/button.hpp"
 #include "gui/widgets/image.hpp"
-#include "gui/widgets/label.hpp"
 #include "gui/widgets/listbox.hpp"
 #include "gui/widgets/multi_page.hpp"
 #include "gui/widgets/scroll_label.hpp"
-#include "gui/widgets/settings.hpp"
 #include "gui/widgets/text_box.hpp"
 #include "gui/widgets/window.hpp"
 
@@ -38,6 +36,7 @@
 #include "preferences/game.hpp"
 #include "preferences/lobby.hpp"
 #include "scripting/plugins/manager.hpp"
+#include "wml_exception.hpp"
 
 static lg::log_domain log_lobby("lobby");
 #define DBG_LB LOG_STREAM(debug, log_lobby)
@@ -222,8 +221,9 @@ void chatbox::append_to_chatbox(const std::string& text, std::size_t id, const b
 	const bool chatbox_at_end = log.vertical_scrollbar_at_end();
 	const unsigned chatbox_position = log.get_vertical_scrollbar_item_position();
 
+	const std::string before_message = log.get_label().empty() ? "" : "\n";
 	const std::string new_text = formatter()
-		<< log.get_label() << "\n" << "<span color='#bcb088'>" << preferences::get_chat_timestamp(std::time(0)) << text << "</span>";
+		<< log.get_label() << before_message << "<span color='#bcb088'>" << preferences::get_chat_timestamp(std::time(0)) << text << "</span>";
 
 	log.set_use_markup(true);
 	log.set_label(new_text);
@@ -249,6 +249,14 @@ void chatbox::send_chat_message(const std::string& message, bool /*allies_only*/
 
 	::config c {"message", ::config {"message", message, "sender", preferences::login()}};
 	send_to_server(c);
+}
+
+void chatbox::clear_messages()
+{
+	const auto id = active_window_;
+	grid& grid = chat_log_container_->page_grid(id);
+	scroll_label& log = find_widget<scroll_label>(&grid, "log_text", false);
+	log.set_label("");
 }
 
 void chatbox::user_relation_changed(const std::string& /*name*/)
@@ -310,7 +318,7 @@ void chatbox::add_whisper_received(const std::string& sender, const std::string&
 		add_active_window_whisper(sender, message);
 		do_notify(mp::notify_mode::whisper, sender, message);
 	} else {
-		LOG_LB << "Ignoring whisper from " << sender << "\n";
+		LOG_LB << "Ignoring whisper from " << sender;
 	}
 }
 
@@ -318,7 +326,7 @@ void chatbox::add_chat_room_message_sent(const std::string& room, const std::str
 {
 	lobby_chat_window* t = room_window_open(room, false);
 	if(!t) {
-		LOG_LB << "Cannot add sent message to ui for room " << room << ", player not in the room\n";
+		LOG_LB << "Cannot add sent message to ui for room " << room << ", player not in the room";
 		return;
 	}
 
@@ -401,10 +409,10 @@ lobby_chat_window* chatbox::find_or_create_window(const std::string& name,
 	//
 	// Add a new chat log page.
 	//
-	string_map item;
+	widget_item item;
 	item["use_markup"] = "true";
 	item["label"] = initial_text;
-	std::map<std::string, string_map> data{{"log_text", item}};
+	widget_data data{{"log_text", item}};
 
 	if(log_ != nullptr) {
 		log_->emplace(name, chatroom_log{item["label"], whisper});
@@ -465,7 +473,7 @@ void chatbox::increment_waiting_whispers(const std::string& name)
 		++t->pending_messages;
 
 		if(t->pending_messages == 1) {
-			DBG_LB << "do whisper pending mark row " << (t - &open_windows_[0]) << " with " << t->name << "\n";
+			DBG_LB << "do whisper pending mark row " << (t - &open_windows_[0]) << " with " << t->name;
 
 			grid* grid = roomlistbox_->get_row_grid(t - &open_windows_[0]);
 			find_widget<image>(grid, "pending_messages", false).set_visible(widget::visibility::visible);
@@ -481,7 +489,7 @@ void chatbox::increment_waiting_messages(const std::string& room)
 		if(t->pending_messages == 1) {
 			int idx = t - &open_windows_[0];
 
-			DBG_LB << "do room pending mark row " << idx << " with " << t->name << "\n";
+			DBG_LB << "do room pending mark row " << idx << " with " << t->name;
 
 			grid* grid = roomlistbox_->get_row_grid(idx);
 			find_widget<image>(grid, "pending_messages", false).set_visible(widget::visibility::visible);
@@ -493,7 +501,7 @@ void chatbox::add_whisper_window_whisper(const std::string& sender, const std::s
 {
 	lobby_chat_window* t = whisper_window_open(sender, false);
 	if(!t) {
-		ERR_LB << "Whisper window not open in add_whisper_window_whisper for " << sender << "\n";
+		ERR_LB << "Whisper window not open in add_whisper_window_whisper for " << sender;
 		return;
 	}
 
@@ -513,7 +521,7 @@ void chatbox::close_window(std::size_t idx)
 {
 	const lobby_chat_window& t = open_windows_[idx];
 
-	DBG_LB << "Close window " << idx << " - " << t.name << "\n";
+	DBG_LB << "Close window " << idx << " - " << t.name;
 
 	// Can't close the lobby!
 	if((t.name == "lobby" && t.whisper == false) || open_windows_.size() == 1) {
@@ -550,7 +558,7 @@ void chatbox::add_room_window_message(const std::string& room,
 {
 	lobby_chat_window* t = room_window_open(room, false);
 	if(!t) {
-		ERR_LB << "Room window not open in add_room_window_message for " << room << "\n";
+		ERR_LB << "Room window not open in add_room_window_message for " << room;
 		return;
 	}
 
@@ -570,7 +578,7 @@ void chatbox::process_message(const ::config& data, bool whisper /*= false*/)
 {
 	std::string sender = data["sender"];
 	DBG_LB << "process message from " << sender << " " << (whisper ? "(w)" : "")
-		<< ", len " << data["message"].str().size() << '\n';
+		<< ", len " << data["message"].str().size();
 
 	if(preferences::is_ignored(sender)) {
 		return;
@@ -588,19 +596,19 @@ void chatbox::process_message(const ::config& data, bool whisper /*= false*/)
 
 		// Attempt to send to the currently active room first.
 		if(room.empty()) {
-			LOG_LB << "Message without a room from " << sender << ", falling back to active window\n";
+			LOG_LB << "Message without a room from " << sender << ", falling back to active window";
 			room = open_windows_[active_window_].name;
 		}
 
 		// If we still don't have a name, fall back to lobby.
 		if(room.empty()) {
-			LOG_LB << "Message without a room from " << sender << ", assuming lobby\n";
+			LOG_LB << "Message without a room from " << sender << ", assuming lobby";
 			room = "lobby";
 		}
 
 		if(log_ != nullptr && data["type"].str() == "motd") {
 			if(log_->at("lobby").received_motd == message) {
-				LOG_LB << "Ignoring repeated motd\n";
+				LOG_LB << "Ignoring repeated motd";
 				return;
 			} else {
 				log_->at("lobby").received_motd = message;
@@ -627,7 +635,7 @@ void chatbox::process_network_data(const ::config& data)
 
 void chatbox::signal_handler_receive_keyboard_focus(const event::ui_event event)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	// Forward focus to the input textbox.
 	get_window()->keyboard_capture(chat_input_);
@@ -644,12 +652,10 @@ chatbox_definition::chatbox_definition(const config& cfg)
 chatbox_definition::resolution::resolution(const config& cfg)
 	: resolution_definition(cfg), grid()
 {
-	state.emplace_back(cfg.child("background"));
-	state.emplace_back(cfg.child("foreground"));
+	state.emplace_back(VALIDATE_WML_CHILD(cfg, "background", missing_mandatory_wml_tag("chatbox_definition][resolution", "background")));
+	state.emplace_back(VALIDATE_WML_CHILD(cfg, "foreground", missing_mandatory_wml_tag("chatbox_definition][resolution", "foreground")));
 
-	const config& child = cfg.child("grid");
-	VALIDATE(child, _("No grid defined."));
-
+	auto child = VALIDATE_WML_CHILD(cfg, "grid", missing_mandatory_wml_tag("chatbox_definition][resolution", "grid"));
 	grid = std::make_shared<builder_grid>(child);
 }
 // }---------- BUILDER -----------{
@@ -662,12 +668,12 @@ builder_chatbox::builder_chatbox(const config& cfg)
 {
 }
 
-widget* builder_chatbox::build() const
+std::unique_ptr<widget> builder_chatbox::build() const
 {
-	chatbox* widget = new chatbox(*this);
+	auto widget = std::make_unique<chatbox>(*this);
 
 	DBG_GUI_G << "Window builder: placed unit preview pane '" << id
-			  << "' with definition '" << definition << "'.\n";
+			  << "' with definition '" << definition << "'.";
 
 	const auto conf = widget->cast_config_to<chatbox_definition>();
 	assert(conf);

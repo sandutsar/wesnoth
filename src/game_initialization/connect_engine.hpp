@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2013 - 2021
+	Copyright (C) 2013 - 2024
 	by Andrius Silinskas <silinskas.andrius@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -60,7 +60,7 @@ public:
 	// Import all sides into the level.
 	void update_level();
 	// Updates the level and sends a diff to the clients.
-	void update_and_send_diff(bool update_time_of_day = false);
+	void update_and_send_diff();
 
 	bool can_start_game() const;
 	void start_game();
@@ -82,10 +82,10 @@ public:
 	const config& level() const { return level_; }
 	config& scenario()
 	{
-		if(config& scenario = level_.child("scenario"))
-			return scenario;
-		else if(config& snapshot = level_.child("snapshot"))
-			return snapshot;
+		if(auto scenario = level_.optional_child("scenario"))
+			return *scenario;
+		else if(auto snapshot = level_.optional_child("snapshot"))
+			return *snapshot;
 		else
 			throw "No scenariodata found";
 	}

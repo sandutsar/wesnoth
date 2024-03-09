@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2003 - 2021
+	Copyright (C) 2003 - 2024
 	by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -19,25 +19,22 @@
 #include "help/help_impl.hpp"                // for section, topic, topic_list, etc
 #include "sound.hpp"                    // for play_UI_sound
 #include "wml_separators.hpp"           // for IMG_TEXT_SEPARATOR, etc
+#include "sdl/input.hpp"                // for get_mouse_state
 
 #include <algorithm>                    // for find
-#include <iostream>                     // for basic_ostream, operator<<, etc
 #include <list>                         // for _List_const_iterator, etc
 #include <utility>                      // for pair
 #include <SDL2/SDL.h>
 
-class CVideo;  // lines 56-56
-
 namespace help {
 
-help_menu::help_menu(CVideo &video, const section& toplevel, int max_height) :
-	gui::menu(video, empty_string_vector, true, max_height, -1, nullptr, &gui::menu::bluebg_style),
+help_menu::help_menu(const section& toplevel, int max_height) :
+	gui::menu(true, max_height, -1, &gui::menu::bluebg_style),
 	visible_items_(),
 	toplevel_(toplevel),
 	expanded_(),
-	restorer_(),
 	chosen_topic_(nullptr),
-	selected_item_(&toplevel, "", 0)
+	selected_item_(&toplevel, 0)
 {
 	silent_ = true; //silence the default menu sounds
 	update_visible_items(toplevel_);
@@ -46,7 +43,7 @@ help_menu::help_menu(CVideo &video, const section& toplevel, int max_height) :
 		selected_item_ = visible_items_.front();
 }
 
-bool help_menu::expanded(const section &sec)
+bool help_menu::expanded(const section &sec) const
 {
 	return expanded_.find(&sec) != expanded_.end();
 }
@@ -73,8 +70,7 @@ void help_menu::update_visible_items(const section &sec, unsigned level)
 	}
 	for (const auto &s : sec.sections) {
 		if (is_visible_id(s.id)) {
-			const std::string vis_string = get_string_to_show(s, level + 1);
-			visible_items_.emplace_back(&s, vis_string, level + 1);
+			visible_items_.emplace_back(&s, level + 1);
 			if (expanded(s)) {
 				update_visible_items(s, level + 1);
 			}
@@ -82,36 +78,9 @@ void help_menu::update_visible_items(const section &sec, unsigned level)
 	}
 	for (const auto &t : sec.topics) {
 		if (is_visible_id(t.id)) {
-			const std::string vis_string = get_string_to_show(t, level + 1);
-			visible_items_.emplace_back(&t, vis_string, level + 1);
+			visible_items_.emplace_back(&t, level + 1);
 		}
 	}
-}
-
-std::string help_menu::indent_list(const std::string& icon, const unsigned level) {
-	std::stringstream to_show;
-	for (unsigned i = 1; i < level; ++i) {
-		to_show << "    "; // Indent 4 spaces
-	}
-
-	to_show << IMG_TEXT_SEPARATOR << IMAGE_PREFIX << icon;
-	return to_show.str();
-}
-
-std::string help_menu::get_string_to_show(const section &sec, const unsigned level)
-{
-	std::stringstream to_show;
-	to_show << indent_list(expanded(sec) ? open_section_img : closed_section_img, level)
-		 << IMG_TEXT_SEPARATOR << sec.title;
-	return to_show.str();
-}
-
-std::string help_menu::get_string_to_show(const topic &topic, const unsigned level)
-{
-	std::stringstream to_show;
-	to_show <<  indent_list(topic_img, level)
-		<< IMG_TEXT_SEPARATOR << topic.title;
-	return to_show.str();
 }
 
 bool help_menu::select_topic_internal(const topic &t, const section &sec)
@@ -157,11 +126,11 @@ int help_menu::process()
 {
 	int res = menu::process();
 	int mousex, mousey;
-	SDL_GetMouseState(&mousex,&mousey);
+	sdl::get_mouse_state(&mousex, &mousey);
 
-	if (!visible_items_.empty() &&
-            static_cast<std::size_t>(res) < visible_items_.size()) {
-
+	if (!visible_items_.empty()
+		&& static_cast<std::size_t>(res) < visible_items_.size())
+	{
 		selected_item_ = visible_items_[res];
 		const section* sec = selected_item_.sec;
 		if (sec != nullptr) {
@@ -170,21 +139,13 @@ int help_menu::process()
 			// * user single-clicks on the icon (or to the left of it): expand or collapse the tree view
 			// * user double-clicks anywhere: expand or collapse the tree view
 			// * note: the first click of the double-click has the single-click effect too
-			int x = mousex - menu::location().x;
-
-			const std::string icon_img = expanded(*sec) ? open_section_img : closed_section_img;
-			// the "thickness" is the width of the left border
-			int text_start = style_->item_size(indent_list(icon_img, selected_item_.level)).w - style_->get_thickness();
-
-			// NOTE: if you want to forbid click to the left of the icon
-			// also check x >= text_start-image_width(icon_img)
-			if (menu::double_clicked() || x < text_start) {
+			if (menu::double_clicked() || hit_on_indent_or_icon(static_cast<std::size_t>(res), mousex)) {
 				// Open or close a section if we double-click on it
 				// or do simple click on the icon.
 				expanded(*sec) ? contract(*sec) : expand(*sec);
 				update_visible_items(toplevel_);
 				display_visible_items();
-			} else if (x >= text_start){
+			} else {
 				// click on title open the topic associated to this section
 				chosen_topic_ = find_topic(default_toplevel, ".."+sec->id );
 			}
@@ -205,22 +166,33 @@ const topic *help_menu::chosen_topic()
 
 void help_menu::display_visible_items()
 {
-	std::vector<std::string> menu_items;
+	std::vector<gui::indented_menu_item> menu_items;
+	std::optional<std::size_t> selected;
 	for(std::vector<visible_item>::const_iterator items_it = visible_items_.begin(),
 		 end = visible_items_.end(); items_it != end; ++items_it) {
-		std::string to_show = items_it->visible_string;
 		if (selected_item_ == *items_it)
-			to_show = std::string("*") + to_show;
-		menu_items.push_back(to_show);
+			selected = menu_items.size();
+		menu_items.push_back(items_it->get_menu_item(*this));
 	}
-	set_items(menu_items, false, true);
+	set_items(menu_items, selected);
 }
 
-help_menu::visible_item::visible_item(const section *_sec, const std::string &vis_string, int lev) :
-	t(nullptr), sec(_sec), visible_string(vis_string), level(lev) {}
+help_menu::visible_item::visible_item(const section *_sec, int lev) :
+	t(nullptr), sec(_sec), level(lev) {}
 
-help_menu::visible_item::visible_item(const topic *_t, const std::string &vis_string, int lev) :
-	t(_t), sec(nullptr), visible_string(vis_string), level(lev) {}
+help_menu::visible_item::visible_item(const topic *_t, int lev) :
+	t(_t), sec(nullptr), level(lev) {}
+
+gui::indented_menu_item help_menu::visible_item::get_menu_item(const help_menu& parent) const
+{
+	if(sec) {
+		const auto& img = parent.expanded(*sec) ? open_section_img : closed_section_img;
+		return {level, img, sec->title};
+	}
+
+	// As sec was a nullptr, this must have a non-null topic
+	return {level, topic_img, t->title};
+}
 
 bool help_menu::visible_item::operator==(const section &_sec) const
 {

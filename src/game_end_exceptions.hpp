@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2006 - 2021
+	Copyright (C) 2006 - 2024
 	by Joerg Hinrichs <joerg.hinrichs@alice-dsl.de>
 	Copyright (C) 2003 by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
@@ -22,31 +22,19 @@
 
 #pragma once
 
+#include "level_result.hpp"
 #include "lua_jailbreak_exception.hpp"
-
-#include "utils/make_enum.hpp"
 
 #include <string>
 #include <exception>
 
 class config;
 
-MAKE_ENUM(LEVEL_RESULT,
-	(VICTORY,      "victory")
-	(DEFEAT,       "defeat")
-	(QUIT,         "quit")
-	(OBSERVER_END, "observer_end")
-	(TEST_NOT_SET, "result_not_set")
-	(TEST_PASS,    "pass")
-	(TEST_FAIL,    "fail")
-	(TEST_INVALID, "test_result_value_invalid")
-);
-
 /**
  * Exception used to escape form the ai or ui code to playsingle_controller::play_side.
  * Never thrown during replays.
  */
-class return_to_play_side_exception : public lua_jailbreak_exception, public std::exception
+class return_to_play_side_exception final : public lua_jailbreak_exception, public std::exception
 {
 public:
 
@@ -54,6 +42,7 @@ public:
 		: lua_jailbreak_exception()
 		, std::exception()
 	{
+		this->store();
 	}
 	const char * what() const noexcept { return "return_to_play_side_exception"; }
 private:
@@ -61,7 +50,7 @@ private:
 	IMPLEMENT_LUA_JAILBREAK_EXCEPTION(return_to_play_side_exception)
 };
 
-class quit_game_exception
+class quit_game_exception final
 	: public lua_jailbreak_exception
 	, public std::exception
 {
@@ -71,6 +60,7 @@ public:
 		: lua_jailbreak_exception()
 		, std::exception()
 	{
+		this->store();
 	}
 	const char * what() const noexcept { return "quit_game_exception"; }
 private:

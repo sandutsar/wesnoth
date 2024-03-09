@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2016 - 2021
+	Copyright (C) 2016 - 2024
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
 	This program is free software; you can redistribute it and/or modify
@@ -28,7 +28,6 @@
 #include "gui/widgets/generator.hpp"
 #include "gui/widgets/label.hpp"
 #include "gui/widgets/listbox.hpp"
-#include "gui/widgets/settings.hpp"
 #include "gui/widgets/stacked_widget.hpp"
 #include "gui/widgets/toggle_panel.hpp"
 #include "gui/widgets/window.hpp"
@@ -168,8 +167,8 @@ void addon_list::set_addons(const addons_list& addons)
 
 		addon_vector_.push_back(&addon);
 
-		std::map<std::string, string_map> data;
-		string_map item;
+		widget_data data;
+		widget_item item;
 
 		if(!tracking_info.can_publish) {
 			item["label"] = addon.display_icon();
@@ -386,7 +385,7 @@ void addon_list::finalize_setup()
 	list.register_sorting_option(3, [this](const int i) { return addon_vector_[i]->downloads; });
 	list.register_translatable_sorting_option(4, [this](const int i) { return addon_vector_[i]->display_type(); });
 
-	auto order = std::pair(0, preferences::SORT_ORDER::ASCENDING);
+	auto order = std::pair(0, sort_order::type::ascending);
 	list.set_active_sorting_option(order);
 }
 
@@ -415,7 +414,7 @@ void addon_list::select_first_addon()
 addon_list_definition::addon_list_definition(const config& cfg)
 	: styled_widget_definition(cfg)
 {
-	DBG_GUI_P << "Parsing add-on list " << id << "\n";
+	DBG_GUI_P << "Parsing add-on list " << id;
 
 	load_resolutions<resolution>(cfg);
 }
@@ -427,10 +426,10 @@ addon_list_definition::resolution::resolution(const config& cfg)
 	static config dummy("draw");
 	state.emplace_back(dummy);
 
-	const config& child = cfg.child("grid");
+	auto child = cfg.optional_child("grid");
 	VALIDATE(child, _("No grid defined."));
 
-	grid = std::make_shared<builder_grid>(child);
+	grid = std::make_shared<builder_grid>(*child);
 }
 
 namespace implementation
@@ -463,12 +462,12 @@ builder_addon_list::builder_addon_list(const config& cfg)
 	}
 }
 
-widget* builder_addon_list::build() const
+std::unique_ptr<widget> builder_addon_list::build() const
 {
-	addon_list* widget = new addon_list(*this);
+	auto widget = std::make_unique<addon_list>(*this);
 
 	DBG_GUI_G << "Window builder: placed add-on list '" << id <<
-		"' with definition '" << definition << "'.\n";
+		"' with definition '" << definition << "'.";
 
 	const auto conf = widget->cast_config_to<addon_list_definition>();
 	assert(conf != nullptr);

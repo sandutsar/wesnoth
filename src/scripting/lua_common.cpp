@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2014 - 2021
+	Copyright (C) 2014 - 2024
 	by Chris Beck <render787@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -39,8 +39,7 @@
 #include <new>                          // for operator new
 #include <string>                       // for string, basic_string
 
-#include "lua/lauxlib.h"
-#include "lua/lua.h"
+#include "lua/wrapper_lauxlib.h"
 
 static const char gettextKey[] = "gettext";
 static const char vconfigKey[] = "vconfig";
@@ -254,7 +253,7 @@ static int impl_vconfig_get(lua_State *L)
 		}
 		for (int j = 1; i != i_end; ++i, ++j)
 		{
-			lua_createtable(L, 2, 0);
+			luaW_push_namedtuple(L, {"tag", "contents"});
 			lua_pushstring(L, i.get_key().c_str());
 			lua_rawseti(L, -2, 1);
 			luaW_pushvconfig(L, i.get_child());
@@ -266,6 +265,17 @@ static int impl_vconfig_get(lua_State *L)
 
 	if (v->null() || !v->has_attribute(m)) return 0;
 	luaW_pushscalar(L, (*v)[m]);
+	return 1;
+}
+
+static int impl_vconfig_dir(lua_State* L)
+{
+	vconfig *v = static_cast<vconfig *>(lua_touserdata(L, 1));
+	std::vector<std::string> attributes;
+	for(const auto& [key, value] : v->get_config().attribute_range()) {
+		attributes.push_back(key);
+	}
+	lua_push(L, attributes);
 	return 1;
 }
 
@@ -470,6 +480,7 @@ std::string register_vconfig_metatable(lua_State *L)
 	static luaL_Reg const callbacks[] {
 		{ "__gc",           &impl_vconfig_collect},
 		{ "__index",        &impl_vconfig_get},
+		{ "__dir",          &impl_vconfig_dir},
 		{ "__len",          &impl_vconfig_size},
 		{ "__pairs",        &impl_vconfig_pairs},
 		{ "__ipairs",       &impl_vconfig_ipairs},
@@ -682,6 +693,12 @@ static int impl_namedtuple_get(lua_State* L)
 	return 0;
 }
 
+static int impl_namedtuple_dir(lua_State* L)
+{
+	luaL_getmetafield(L, 1, "__names");
+	return 1;
+}
+
 static int impl_namedtuple_tostring(lua_State* L)
 {
 	std::vector<std::string> elems;
@@ -701,6 +718,7 @@ void luaW_push_namedtuple(lua_State* L, const std::vector<std::string>& names)
 	lua_createtable(L, 0, 4);
 	static luaL_Reg callbacks[] = {
 		{ "__index", &impl_namedtuple_get },
+		{ "__dir", &impl_namedtuple_dir },
 		{ "__tostring", &impl_namedtuple_tostring },
 		{ nullptr, nullptr }
 	};
@@ -823,6 +841,7 @@ void luaW_pushconfig(lua_State *L, const config& cfg)
 
 bool luaW_toconfig(lua_State *L, int index, config &cfg)
 {
+	cfg.clear();
 	if (!lua_checkstack(L, LUA_MINSTACK))
 		return false;
 
@@ -997,7 +1016,7 @@ bool luaW_pushvariable(lua_State *L, variable_access_const& v)
 	}
 	catch (const invalid_variablename_exception&)
 	{
-		WRN_LUA << v.get_error_message() << "\n";
+		WRN_LUA << v.get_error_message();
 		return false;
 	}
 }
@@ -1026,7 +1045,6 @@ bool luaW_checkvariable(lua_State *L, variable_access_create& v, int n)
 		case LUA_TTABLE:
 			{
 				config &cfg = v.as_container();
-				cfg.clear();
 				if (luaW_toconfig(L, n, cfg)) {
 					return true;
 				}
@@ -1040,7 +1058,7 @@ bool luaW_checkvariable(lua_State *L, variable_access_create& v, int n)
 	}
 	catch (const invalid_variablename_exception&)
 	{
-		WRN_LUA << v.get_error_message() << " when attempting to write a '" << lua_typename(L, variabletype) << "'\n";
+		WRN_LUA << v.get_error_message() << " when attempting to write a '" << lua_typename(L, variabletype) << "'";
 		return false;
 	}
 }
@@ -1098,9 +1116,12 @@ int luaW_pcall_internal(lua_State *L, int nArgs, int nRets)
 
 	int error_handler_index = lua_gettop(L) - nArgs - 1;
 
+	++lua_jailbreak_exception::jail_depth;
+
 	// Call the function.
 	int errcode = lua_pcall(L, nArgs, nRets, -2 - nArgs);
 
+	--lua_jailbreak_exception::jail_depth;
 	lua_jailbreak_exception::rethrow();
 
 	// Remove the error handler.
@@ -1122,6 +1143,8 @@ bool luaW_pcall(lua_State *L, int nArgs, int nRets, bool allow_wml_error)
 		/*
 		 * When an exception is thrown which doesn't derive from
 		 * std::exception m will be nullptr pointer.
+		 * When adding a new conditional branch, remember to log the
+		 * error with ERR_LUA or ERR_WML.
 		 */
 		char const *m = lua_tostring(L, -1);
 		if(m) {
@@ -1138,12 +1161,14 @@ bool luaW_pcall(lua_State *L, int nArgs, int nRets, bool allow_wml_error)
 #pragma warning (pop)
 #endif
 					e = em;
+				ERR_LUA << std::string(m, e ? e - m : strlen(m));
 				chat_message("Lua error", std::string(m, e ? e - m : strlen(m)));
 			} else {
-				ERR_LUA << m << '\n';
+				ERR_LUA << m;
 				chat_message("Lua error", m);
 			}
 		} else {
+			ERR_LUA << "Lua caught unknown exception";
 			chat_message("Lua caught unknown exception", "");
 		}
 		lua_pop(L, 1);

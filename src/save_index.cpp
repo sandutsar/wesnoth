@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2003 - 2021
+	Copyright (C) 2003 - 2024
 	by Jörg Hinrichs, David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -130,14 +130,14 @@ void save_index_class::write_save_index()
 	try {
 		filesystem::scoped_ostream stream = filesystem::ostream_file(filesystem::get_save_index_file());
 
-		if(preferences::save_compression_format() != compression::NONE) {
+		if(preferences::save_compression_format() != compression::format::none) {
 			// TODO: maybe allow writing this using bz2 too?
 			write_gz(*stream, data());
 		} else {
 			write(*stream, data());
 		}
 	} catch(const filesystem::io_exception& e) {
-		ERR_SAVE << "error writing to save index file: '" << e.what() << "'" << std::endl;
+		ERR_SAVE << "error writing to save index file: '" << e.what() << "'";
 	}
 }
 
@@ -160,9 +160,9 @@ save_index_class::save_index_class(create_for_default_saves_dir)
 config& save_index_class::data(const std::string& name)
 {
 	config& cfg = data();
-	if(config& sv = cfg.find_child("save", "save", name)) {
-		fix_leader_image_path(sv);
-		return sv;
+	if(auto sv = cfg.find_child("save", "save", name)) {
+		fix_leader_image_path(*sv);
+		return *sv;
 	}
 
 	config& res = cfg.add_child("save");
@@ -185,9 +185,9 @@ config& save_index_class::data()
 				read(data_, *stream);
 			}
 		} catch(const filesystem::io_exception& e) {
-			ERR_SAVE << "error reading save index: '" << e.what() << "'" << std::endl;
+			ERR_SAVE << "error reading save index: '" << e.what() << "'";
 		} catch(const config::error& e) {
-			ERR_SAVE << "error parsing save index config file:\n" << e.message << std::endl;
+			ERR_SAVE << "error parsing save index config file:\n" << e.message;
 			data_.clear();
 		}
 
@@ -307,7 +307,7 @@ static filesystem::scoped_istream find_save_file(const std::string& dir,
 		}
 	}
 
-	LOG_SAVE << "Could not open supplied filename '" << name << "'\n";
+	LOG_SAVE << "Could not open supplied filename '" << name << "'";
 	throw game::load_game_failed();
 }
 
@@ -347,7 +347,7 @@ void read_save_file(const std::string& dir, const std::string& name, config& cfg
 	}
 
 	if(cfg.empty()) {
-		LOG_SAVE << "Could not parse file data into config\n";
+		LOG_SAVE << "Could not parse file data into config";
 		throw game::load_game_failed();
 	}
 }
@@ -370,7 +370,7 @@ void save_index_class::delete_old_auto_saves(const int autosavemax, const int in
 	std::vector<save_info> games = get_saves_list(&auto_save);
 	for(std::vector<save_info>::iterator i = games.begin(); i != games.end(); ++i) {
 		if(countdown-- <= 0) {
-			LOG_SAVE << "Deleting savegame '" << i->name() << "'\n";
+			LOG_SAVE << "Deleting savegame '" << i->name() << "'";
 			delete_game(i->name());
 		}
 	}
@@ -402,16 +402,16 @@ save_info create_save_info::operator()(const std::string& filename) const
 
 void extract_summary_from_config(config& cfg_save, config& cfg_summary)
 {
-	const config& cfg_snapshot = cfg_save.child("snapshot");
+	auto cfg_snapshot = cfg_save.optional_child("snapshot");
 
 	// Servergenerated replays contain [scenario] and no [replay_start]
-	const config& cfg_replay_start = cfg_save.child("replay_start")
-		? cfg_save.child("replay_start")
-		: cfg_save.child("scenario");
+	auto cfg_replay_start = cfg_save.has_child("replay_start")
+		? cfg_save.optional_child("replay_start")
+		: cfg_save.optional_child("scenario");
 
-	const config& cfg_replay = cfg_save.child("replay");
-	const bool has_replay = cfg_replay && !cfg_replay.empty();
-	const bool has_snapshot = cfg_snapshot && cfg_snapshot.has_child("side");
+	auto cfg_replay = cfg_save.optional_child("replay");
+	const bool has_replay = cfg_replay && !cfg_replay->empty();
+	const bool has_snapshot = cfg_snapshot && cfg_snapshot->has_child("side");
 
 	cfg_summary["replay"] = has_replay;
 	cfg_summary["snapshot"] = has_snapshot;
@@ -420,7 +420,7 @@ void extract_summary_from_config(config& cfg_save, config& cfg_summary)
 	cfg_summary["campaign_type"] = cfg_save["campaign_type"];
 
 	if(cfg_save.has_child("carryover_sides_start")) {
-		cfg_summary["scenario"] = cfg_save.child("carryover_sides_start")["next_scenario"];
+		cfg_summary["scenario"] = cfg_save.mandatory_child("carryover_sides_start")["next_scenario"];
 	} else {
 		cfg_summary["scenario"] = cfg_save["scenario"];
 	}
@@ -448,8 +448,8 @@ void extract_summary_from_config(config& cfg_save, config& cfg_summary)
 
 	bool shrouded = false;
 
-	if(const config& snapshot = *(has_snapshot ? &cfg_snapshot : &cfg_replay_start)) {
-		for(const config& side : snapshot.child_range("side")) {
+	if(auto snapshot = (has_snapshot ? cfg_snapshot : cfg_replay_start)) {
+		for(const config& side : snapshot->child_range("side")) {
 			std::string leader;
 			std::string leader_image;
 			std::string leader_image_tc_modifier;
@@ -457,7 +457,7 @@ void extract_summary_from_config(config& cfg_save, config& cfg_summary)
 			int gold = side["gold"];
 			int units = 0, recall_units = 0;
 
-			if(side["controller"] != team::CONTROLLER::enum_to_string(team::CONTROLLER::HUMAN)) {
+			if(side["controller"] != side_controller::human) {
 				continue;
 			}
 
@@ -515,16 +515,16 @@ void extract_summary_from_config(config& cfg_save, config& cfg_summary)
 
 	if(!shrouded) {
 		if(has_snapshot) {
-			if(!cfg_snapshot.find_child("side", "shroud", "yes") && cfg_snapshot.has_attribute("map_data")) {
+			if(!cfg_snapshot->find_child("side", "shroud", "yes") && cfg_snapshot->has_attribute("map_data")) {
 				cfg_summary["map_data"] = cfg_snapshot["map_data"].str();
 			} else {
-				ERR_SAVE << "Not saving map because there is shroud" << std::endl;
+				ERR_SAVE << "Not saving map because there is shroud";
 			}
 		} else if(has_replay) {
-			if(!cfg_replay_start.find_child("side", "shroud", "yes") && cfg_replay_start.has_attribute("map_data")) {
+			if(!cfg_replay_start->find_child("side", "shroud", "yes") && cfg_replay_start->has_attribute("map_data")) {
 				cfg_summary["map_data"] = cfg_replay_start["map_data"];
 			} else {
-				ERR_SAVE << "Not saving map because there is shroud" << std::endl;
+				ERR_SAVE << "Not saving map because there is shroud";
 			}
 		}
 	}

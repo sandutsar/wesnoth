@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2003 - 2021
+	Copyright (C) 2003 - 2024
 	by Guillaume Melquiond <guillaume.melquiond@gmail.com>
 	Copyright (C) 2003 by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
@@ -26,9 +26,6 @@
 #include "serialization/string_utils.hpp"
 
 #include <cstdlib>
-#include <cstring>
-#include <deque>
-#include <functional>
 #include <istream>
 
 static lg::log_domain log_config("config");
@@ -135,8 +132,9 @@ namespace
 {
 /**
  * Attempts to convert @a source to the template type.
- * This is to avoid "overzealous reinterpretations of certain WML strings as
- * numeric types" (c.f. bug #19201).
+ * This is to avoid "overzealous reinterpretations of certain WML strings as numeric types".
+ * For example: the version "2.1" and "2.10" are not the same.
+ * Another example: the string "0001" given to [message] should not be displayed to the player as just "1".
  * @returns true if the conversion was successful and the source string
  *          can be reobtained by streaming the result.
  */
@@ -221,6 +219,13 @@ config_attribute_value& config_attribute_value::operator=(const std::string& v)
 	return *this;
 }
 
+config_attribute_value& config_attribute_value::operator=(const std::string_view& v)
+{
+	// TODO: Currently this acts just like std::string assignment.
+	// Perhaps the underlying variant should take a string_view directly?
+	return operator=(std::string(v));
+
+}
 config_attribute_value& config_attribute_value::operator=(const t_string& v)
 {
 	if(!v.translatable()) {
@@ -232,6 +237,13 @@ config_attribute_value& config_attribute_value::operator=(const t_string& v)
 }
 
 void config_attribute_value::write_if_not_empty(const std::string& v)
+{
+	if(!v.empty()) {
+		*this = v;
+	}
+}
+
+void config_attribute_value::write_if_not_empty(const t_string& v)
 {
 	if(!v.empty()) {
 		*this = v;

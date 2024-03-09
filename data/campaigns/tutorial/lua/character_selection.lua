@@ -20,10 +20,11 @@ function wml_actions.select_character()
 	if character == 2 then
 		wesnoth.units.to_map({
 			type = "Fighteress",
+			side = 1,
 			id = unit.id,
 			name = _"Li’sar",
 			unrenamable = true,
-			profile = "portraits/lisar.png",
+			profile = "portraits/lisar.webp",
 			canrecruit = true,
 			facing = unit.facing,
 		}, unit.x, unit.y )

@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2009 - 2021
+	Copyright (C) 2009 - 2024
 	by Tomasz Sniatowski <kailoran@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -126,13 +126,13 @@ void lobby_info::process_gamelist(const config& data)
 
 	games_by_id_.clear();
 
-	for(const auto& c : gamelist_.child("gamelist").child_range("game")) {
+	for(const auto& c : gamelist_.mandatory_child("gamelist").child_range("game")) {
 		game_info game(c, installed_addons_);
 		games_by_id_.emplace(game.id, std::move(game));
 	}
 
 	DBG_LB << dump_games_map(games_by_id_);
-	DBG_LB << dump_games_config(gamelist_.child("gamelist"));
+	DBG_LB << dump_games_config(gamelist_.mandatory_child("gamelist"));
 
 	process_userlist();
 }
@@ -155,24 +155,24 @@ bool lobby_info::process_gamelist_diff_impl(const config& data)
 		return false;
 	}
 
-	DBG_LB << "prediff " << dump_games_config(gamelist_.child("gamelist"));
+	DBG_LB << "prediff " << dump_games_config(gamelist_.mandatory_child("gamelist"));
 
 	try {
 		gamelist_.apply_diff(data, true);
 	} catch(const config::error& e) {
-		ERR_LB << "Error while applying the gamelist diff: '" << e.message << "' Getting a new gamelist.\n";
+		ERR_LB << "Error while applying the gamelist diff: '" << e.message << "' Getting a new gamelist.";
 		return false;
 	}
 
-	DBG_LB << "postdiff " << dump_games_config(gamelist_.child("gamelist"));
+	DBG_LB << "postdiff " << dump_games_config(gamelist_.mandatory_child("gamelist"));
 	DBG_LB << dump_games_map(games_by_id_);
 
-	for(config& c : gamelist_.child("gamelist").child_range("game")) {
-		DBG_LB << "data process: " << c["id"] << " (" << c[config::diff_track_attribute] << ")\n";
+	for(config& c : gamelist_.mandatory_child("gamelist").child_range("game")) {
+		DBG_LB << "data process: " << c["id"] << " (" << c[config::diff_track_attribute] << ")";
 
 		const int game_id = c["id"];
 		if(game_id == 0) {
-			ERR_LB << "game with id 0 in gamelist config" << std::endl;
+			ERR_LB << "game with id 0 in gamelist config";
 			return false;
 		}
 
@@ -196,7 +196,7 @@ bool lobby_info::process_gamelist_diff_impl(const config& data)
 			current_i->second.display_status = game_info::disp_status::UPDATED;
 		} else if(diff_result == "deleted") {
 			if(current_i == games_by_id_.end()) {
-				WRN_LB << "Would have to delete a game that I don't have: " << game_id << std::endl;
+				WRN_LB << "Would have to delete a game that I don't have: " << game_id;
 				continue;
 			}
 
@@ -215,11 +215,11 @@ bool lobby_info::process_gamelist_diff_impl(const config& data)
 	try {
 		gamelist_.clear_diff_track(data);
 	} catch(const config::error& e) {
-		ERR_LB << "Error while applying the gamelist diff (2): '" << e.message << "' Getting a new gamelist.\n";
+		ERR_LB << "Error while applying the gamelist diff (2): '" << e.message << "' Getting a new gamelist.";
 		return false;
 	}
 
-	DBG_LB << "postclean " << dump_games_config(gamelist_.child("gamelist"));
+	DBG_LB << "postclean " << dump_games_config(gamelist_.mandatory_child("gamelist"));
 
 	process_userlist();
 	return true;
@@ -239,7 +239,7 @@ void lobby_info::process_userlist()
 
 		game_info* g = get_game_by_id(ui.game_id);
 		if(!g) {
-			WRN_NG << "User " << ui.name << " has unknown game_id: " << ui.game_id << std::endl;
+			WRN_NG << "User " << ui.name << " has unknown game_id: " << ui.game_id;
 			continue;
 		}
 
@@ -280,7 +280,7 @@ std::function<void()> lobby_info::begin_state_sync()
 			}
 		}
 
-		DBG_LB << " -> " << games_by_id_.size() << std::endl;
+		DBG_LB << " -> " << games_by_id_.size();
 
 		make_games_vector();
 

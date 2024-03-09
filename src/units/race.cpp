@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2003 - 2021
+	Copyright (C) 2003 - 2024
 	by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -82,7 +82,7 @@ unit_race::unit_race(const config& cfg) :
 {
 	if (plural_name_.empty()) {
 		lg::log_to_chat() << "[race] id='" << id_ << "' is missing a plural_name field.\n";
-		ERR_WML << "[race] id='" << id_ << "' is missing a plural_name field.\n";
+		ERR_WML << "[race] id='" << id_ << "' is missing a plural_name field.";
 		plural_name_ = (cfg["name"]);
 	}
 
@@ -100,7 +100,7 @@ unit_race::unit_race(const config& cfg) :
 			<< "[race] id='" << id_
 			<< "' is missing a singular name field (either 'name' or both 'male_name' and 'female_name').\n";
 		ERR_WML << "[race] id'" << id_
-				<< "' is missing a singular name field (either 'name' or both 'male_name' and 'female_name').\n";
+				<< "' is missing a singular name field (either 'name' or both 'male_name' and 'female_name').";
 	}
 
 	name_generator_factory generator_factory = name_generator_factory(cfg, {"male", "female"});
@@ -113,7 +113,7 @@ unit_race::unit_race(const config& cfg) :
 
 std::string unit_race::generate_name(unit_race::GENDER gender) const
 {
-    return name_generator_[gender]->generate();
+	return name_generator_[gender]->generate();
 }
 
 const name_generator& unit_race::generator(unit_race::GENDER gender) const
@@ -133,7 +133,7 @@ const config::const_child_itors &unit_race::additional_traits() const
 
 const config::const_child_itors &unit_race::additional_topics() const
 {
-  return topics_;
+	return topics_;
 }
 
 unsigned int unit_race::num_traits() const { return ntraits_; }
@@ -156,6 +156,13 @@ unit_race::GENDER string_gender(const std::string& str, unit_race::GENDER def) {
 		return unit_race::FEMALE;
 	}
 	return def;
+}
+
+const config::attribute_value & gender_value(
+    const config & cfg, unit_race::GENDER gender, const std::string & male_key,
+    const std::string & female_key, const std::string & default_key)
+{
+    return cfg.get_or(gender == unit_race::MALE ? male_key : female_key, default_key);
 }
 
 std::string unit_race::get_icon_path_stem() const

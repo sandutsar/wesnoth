@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2014 - 2021
+	Copyright (C) 2014 - 2024
 	by Chris Beck <render787@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -23,8 +23,7 @@
 #include <string>
 #include <cstring>
 
-#include "lua/lua.h"
-#include "lua/lauxlib.h"
+#include "lua/wrapper_lauxlib.h"
 
 /**
  * Implementation for a lua reference to a unit_type.
@@ -48,7 +47,7 @@ static int impl_unit_type_get(lua_State *L)
 	// Find the corresponding attribute.
 	return_tstring_attrib("name", ut.type_name());
 	return_string_attrib("id", ut.id());
-	return_string_attrib("alignment", ut.alignment().to_string());
+	return_string_attrib("alignment", unit_alignments::get_string(ut.alignment()));
 	return_string_attrib("race", ut.race_id());
 	return_string_attrib("image", ut.image());
 	return_string_attrib("icon", ut.icon());
@@ -177,6 +176,10 @@ static int impl_unit_type_next(lua_State* L)
 	}
 	lua_pushlstring(L, it->first.c_str(), it->first.size());
 	luaW_pushunittype(L, it->second);
+	if(!base) {
+		// Make sure the unit is built.
+		unit_types.build_unit_type(it->second, unit_type::FULL);
+	}
 	return 2;
 }
 

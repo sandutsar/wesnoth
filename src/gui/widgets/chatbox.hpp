@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2016 - 2021
+	Copyright (C) 2016 - 2024
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
 	This program is free software; you can redistribute it and/or modify
@@ -16,7 +16,6 @@
 
 #include "chat_events.hpp"
 #include "chat_log.hpp"
-#include "game_initialization/lobby_data.hpp"
 #include "game_initialization/lobby_info.hpp"
 #include "gui/widgets/container_base.hpp"
 
@@ -195,6 +194,8 @@ public:
 	/** Inherited form @ref chat_handler */
 	virtual void send_chat_message(const std::string& message, bool allies_only) override;
 
+	virtual void clear_messages() override;
+
 	/**
 	 * Switch to the window given by a valid pointer (e.g. received from a call
 	 * to *_window_open)
@@ -262,7 +263,7 @@ public:
 
 	using builder_styled_widget::build;
 
-	virtual widget* build() const override;
+	virtual std::unique_ptr<widget> build() const override;
 
 private:
 };

@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2011 - 2021
+	Copyright (C) 2011 - 2024
 	by Lukasz Dobrogowski <lukasz.dobrogowski@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include "log.hpp"                      // for logger, set_strict_severity, etc
+
 #include <optional>
 
 #include <boost/program_options/options_description.hpp>
@@ -26,7 +28,7 @@
 class bad_commandline_resolution : public boost::program_options::error
 {
 public:
-    bad_commandline_resolution(const std::string& resolution);
+	bad_commandline_resolution(const std::string& resolution);
 };
 
 class bad_commandline_tuple : public boost::program_options::error
@@ -107,7 +109,7 @@ public:
 	 * Contains parsed arguments of --log-* (e.g. --log-debug).
 	 * Vector of pairs (severity, log domain).
 	 */
-	std::optional<std::vector<std::pair<int, std::string>>> log;
+	std::optional<std::vector<std::pair<lg::severity, std::string>>> log;
 	/** Non-empty if --log-strict was given */
 	std::optional<int> log_strict_level;
 	/** Non-empty if --load was given on the command line. Savegame specified to load after start. */
@@ -210,6 +212,10 @@ public:
 	bool noreplaycheck;
 	/** True if --mp-test was given on the command line. */
 	bool mptest;
+	/** True if --usercache-path was given on the command line. Prints path to cache directory and exits. */
+	bool usercache_path;
+	/** Non-empty if --usercache-dir was given on the command line. Sets the cache dir to the specified one. */
+	std::optional<std::string> usercache_dir;
 	/** True if --userconfig-path was given on the command line. Prints path to user config directory and exits. */
 	bool userconfig_path;
 	/** Non-empty if --userconfig-dir was given on the command line. Sets the user config dir to the specified one. */
@@ -248,7 +254,7 @@ public:
 	/** Non-empty if --all-translations or --translations-over is given on the command line. */
 	std::optional<unsigned int> translation_percent;
 private:
-	void parse_log_domains_(const std::string &domains_string, const int severity);
+	void parse_log_domains_(const std::string &domains_string, const lg::severity severity);
 	void parse_log_strictness (const std::string &severity);
 	void parse_resolution_ (const std::string &resolution_string);
 	/** A helper function splitting vector of strings of format unsigned int:string to vector of tuples (unsigned int,string) */

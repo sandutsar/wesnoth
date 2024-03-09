@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2010 - 2021
+	Copyright (C) 2010 - 2024
 	by Guillaume Melquiond <guillaume.melquiond@gmail.com>
 	Copyright (C) 2006 - 2009 by Rusty Russell <rusty@rustcorp.com.au>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
@@ -14,6 +14,7 @@
 	See the COPYING file for more details.
 */
 
+#include "display.hpp"
 #include "log.hpp"
 #include "units/id.hpp"
 #include "units/unit.hpp"
@@ -93,7 +94,7 @@ unit_map::umap_retval_pair_t unit_map::add(const map_location& l, const unit& u)
 unit_map::umap_retval_pair_t unit_map::move(const map_location& src, const map_location& dst)
 {
 	self_check();
-	DBG_NG << "Unit map: Moving unit from " << src << " to " << dst << "\n";
+	DBG_NG << "Unit map: Moving unit from " << src << " to " << dst;
 
 	// Find the unit at the src location
 	lmap::iterator i = lmap_.find(src);
@@ -126,6 +127,8 @@ unit_map::umap_retval_pair_t unit_map::move(const map_location& src, const map_l
 		return std::pair(make_unit_iterator(uit), false);
 	}
 
+	display::get_singleton()->invalidate(src);
+
 	self_check();
 
 	return std::pair(make_unit_iterator(uit), true);
@@ -144,14 +147,14 @@ unit_map::umap_retval_pair_t unit_map::insert(unit_ptr p)
 	const map_location& loc = p->get_location();
 
 	if(!loc.valid()) {
-		ERR_NG << "Trying to add " << p->name() << " - " << p->id() << " at an invalid location; Discarding.\n";
+		ERR_NG << "Trying to add " << p->name() << " - " << p->id() << " at an invalid location; Discarding.";
 		return std::pair(make_unit_iterator(umap_.end()), false);
 	}
 
 	unit_pod upod;
 	upod.unit = p;
 
-	DBG_NG << "Adding unit " << p->underlying_id() << " - " << p->id() << " to location: (" << loc << ")\n";
+	DBG_NG << "Adding unit " << p->underlying_id() << " - " << p->id() << " to location: (" << loc << ")";
 
 	std::pair<umap::iterator, bool> uinsert = umap_.emplace(unit_id, upod);
 
@@ -169,25 +172,16 @@ unit_map::umap_retval_pair_t unit_map::insert(unit_ptr p)
 				   << " ("  << loc << ") over " << q->name()
 				   << " - " << q->id() << " - " << q->underlying_id()
 				   << " ("  << q->get_location()
-				   << ").\n";
+				   << ").";
 
 			p->mark_clone(false);
 			ERR_NG << "The new unit was assigned underlying_id=" << p->underlying_id()
-				   << " to prevent duplicate id conflicts.\n";
+				   << " to prevent duplicate id conflicts.";
 
 			uinsert = umap_.emplace(p->underlying_id(), upod);
 
 			int guard(0);
 			while(!uinsert.second && (++guard < 1e6)) {
-				if(guard % 10 == 9) {
-					ERR_NG << "\n\nPlease Report this error to https://gna.org/bugs/index.php?18591 "
-						"\nIn addition to the standard details of operating system and wesnoth version "
-						"and how it happened, please answer the following questions "
-						"\n 1. Were you playing multi-player?"
-						"\n 2. Did you start/restart/reload the game/scenario?"
-						"\nThank you for your help in fixing this bug.\n";
-				}
-
 				p->mark_clone(false);
 				uinsert = umap_.emplace(p->underlying_id(), upod);
 			}
@@ -255,7 +249,7 @@ void unit_map::clear(bool force)
 
 	for(umap::iterator i = umap_.begin(); i != umap_.end(); ++i) {
 		if(is_valid(i)) {
-			DBG_NG << "Delete unit " << i->second.unit->underlying_id() << "\n";
+			DBG_NG << "Delete unit " << i->second.unit->underlying_id();
 			i->second.unit.reset();
 		}
 	}
@@ -278,7 +272,7 @@ unit_ptr unit_map::extract(const map_location& loc)
 	unit_ptr u = uit->second.unit;
 	std::size_t uid(u->underlying_id());
 
-	DBG_NG << "Extract unit " << uid << " - " << u->id() << " from location: (" << loc << ")\n";
+	DBG_NG << "Extract unit " << uid << " - " << u->id() << " from location: (" << loc << ")";
 
 	assert(uit->first == uit->second.unit->underlying_id());
 	if(uit->second.ref_count == 0) {
@@ -384,7 +378,7 @@ bool unit_map::self_check() const
 	for(; uit != umap_.end(); ++uit) {
 		if(uit->second.ref_count < 0) {
 			good = false;
-			ERR_NG << "unit_map pod ref_count <0 is " << uit->second.ref_count << std::endl;
+			ERR_NG << "unit_map pod ref_count <0 is " << uit->second.ref_count;
 		}
 
 		if(uit->second.unit) {
@@ -393,18 +387,18 @@ bool unit_map::self_check() const
 
 		if(uit->first <= 0) {
 			good = false;
-			ERR_NG << "unit_map umap uid <=0 is " << uit->first << std::endl;
+			ERR_NG << "unit_map umap uid <=0 is " << uit->first;
 		}
 
 		if(!uit->second.unit && uit->second.ref_count == 0) {
 			good = false;
-			ERR_NG << "unit_map umap unit==nullptr when refcount == 0" << std::endl;
+			ERR_NG << "unit_map umap unit==nullptr when refcount == 0";
 		}
 
 		if(uit->second.unit && uit->second.unit->underlying_id() != uit->first) {
 			good = false;
 			ERR_NG << "unit_map umap uid(" << uit->first << ") != underlying_id()[" << uit->second.unit->underlying_id()
-				   << "]" << std::endl;
+				   << "]";
 		}
 	}
 
@@ -412,11 +406,11 @@ bool unit_map::self_check() const
 	for(; locit != lmap_.end(); ++locit) {
 		if(locit->second == umap_.end()) {
 			good = false;
-			ERR_NG << "unit_map lmap element == umap_.end() " << std::endl;
+			ERR_NG << "unit_map lmap element == umap_.end() ";
 		}
 		if(locit->first != locit->second->second.unit->get_location()) {
 			good = false;
-			ERR_NG << "unit_map lmap location != unit->get_location() " << std::endl;
+			ERR_NG << "unit_map lmap location != unit->get_location() ";
 		}
 	}
 

@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -32,20 +32,45 @@
 #include "serialization/string_utils.hpp"
 #include "serialization/unicode.hpp"
 #include "preferences/general.hpp"
+#include "video.hpp"
 
 #include <boost/algorithm/string/replace.hpp>
+#include <boost/functional/hash_fwd.hpp>
 
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
 
-namespace font {
+static lg::log_domain log_font("font");
+#define DBG_FT LOG_STREAM(debug, log_font)
+
+namespace font
+{
+
+namespace
+{
+/**
+ * The text texture cache.
+ *
+ * Each time a specific bit of text is rendered, a corresponding texture is created and
+ * added to the cache. We don't store the surface since there isn't really any use for
+ * it. If we need texture size that can be easily queried.
+ *
+ * @todo Figure out how this can be optimized with a texture atlas. It should be possible
+ * to store smaller bits of text in the atlas and construct new textures from hem.
+ */
+std::map<std::size_t, texture> rendered_cache{};
+} // anon namespace
+
+void flush_texture_cache()
+{
+	rendered_cache.clear();
+}
 
 pango_text::pango_text()
 	: context_(pango_font_map_create_context(pango_cairo_font_map_get_default()), g_object_unref)
 	, layout_(pango_layout_new(context_.get()), g_object_unref)
 	, rect_()
-	, surface_()
 	, text_()
 	, markedup_text_(false)
 	, link_aware_(false)
@@ -63,8 +88,7 @@ pango_text::pango_text()
 	, maximum_length_(std::string::npos)
 	, calculation_dirty_(true)
 	, length_(0)
-	, surface_dirty_(true)
-	, rendered_viewport_()
+	, pixel_scale_(1)
 	, surface_buffer_()
 {
 	// With 72 dpi the sizes are the same as with SDL_TTF so hardcoded.
@@ -73,53 +97,73 @@ pango_text::pango_text()
 	pango_layout_set_ellipsize(layout_.get(), ellipse_mode_);
 	pango_layout_set_alignment(layout_.get(), alignment_);
 	pango_layout_set_wrap(layout_.get(), PANGO_WRAP_WORD_CHAR);
-
-	/*
-	 * Set the pango spacing a bit bigger since the default is deemed to small
-	 * https://www.wesnoth.org/forum/viewtopic.php?p=358832#p358832
-	 */
-	pango_layout_set_spacing(layout_.get(), 4 * PANGO_SCALE);
+	pango_layout_set_line_spacing(layout_.get(), get_line_spacing_factor());
 
 	cairo_font_options_t *fo = cairo_font_options_create();
 	cairo_font_options_set_hint_style(fo, CAIRO_HINT_STYLE_FULL);
 	cairo_font_options_set_hint_metrics(fo, CAIRO_HINT_METRICS_ON);
-	// Always use grayscale AA, particularly on Windows where ClearType subpixel hinting
-	// will result in colour fringing otherwise. See from_cairo_format() further below.
-	cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_GRAY);
+	cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_DEFAULT);
 
 	pango_cairo_context_set_font_options(context_.get(), fo);
 	cairo_font_options_destroy(fo);
 }
 
-surface& pango_text::render(const SDL_Rect& viewport)
+texture pango_text::render_texture(const SDL_Rect& viewport)
 {
-	rerender(viewport);
-	return surface_;
+	return with_draw_scale(texture(render_surface(viewport)));
 }
 
-surface& pango_text::render()
+texture pango_text::render_and_get_texture()
 {
+	// Update our settings then hash them.
+	update_pixel_scale(); // TODO: this should be in recalculate()
 	recalculate();
-	auto viewport = SDL_Rect{0, 0, rect_.x + rect_.width, rect_.y + rect_.height};
-	rerender(viewport);
-	return surface_;
+	const std::size_t hash = std::hash<pango_text>{}(*this);
+	// If we already have the appropriate texture in-cache, use it.
+	if(const auto iter = rendered_cache.find(hash); iter != rendered_cache.end()) {
+		return with_draw_scale(iter->second);
+	}
+
+	if(surface text_surf = create_surface(); text_surf) {
+		const auto& [new_iter, added] = rendered_cache.try_emplace(hash, std::move(text_surf));
+		return with_draw_scale(new_iter->second);
+	}
+
+	// Render output was null for some reason. Don't cache.
+	return {};
 }
 
-int pango_text::get_width() const
+surface pango_text::render_surface(const SDL_Rect& viewport)
 {
-	return this->get_size().x;
+	update_pixel_scale(); // TODO: this should be in recalculate()
+	recalculate();
+	return create_surface(viewport);
 }
 
-int pango_text::get_height() const
+texture pango_text::with_draw_scale(const texture& t) const
 {
-	return this->get_size().y;
+	texture res(t);
+	res.set_draw_size(to_draw_scale(t.get_raw_size()));
+	return res;
 }
 
-point pango_text::get_size() const
+int pango_text::to_draw_scale(int i) const
 {
+	return (i + pixel_scale_ - 1) / pixel_scale_;
+}
+
+point pango_text::to_draw_scale(const point& p) const
+{
+	// Round up, rather than truncating.
+	return {to_draw_scale(p.x), to_draw_scale(p.y)};
+}
+
+point pango_text::get_size()
+{
+	update_pixel_scale(); // TODO: this should be in recalculate()
 	this->recalculate();
 
-	return point(rect_.width, rect_.height);
+	return to_draw_scale({rect_.width, rect_.height});
 }
 
 bool pango_text::is_truncated() const
@@ -149,19 +193,41 @@ unsigned pango_text::insert_text(const unsigned offset, const std::string& text)
 	return len;
 }
 
-point pango_text::get_cursor_position(
-		const unsigned column, const unsigned line) const
+int pango_text::get_byte_offset(const unsigned column) const
+{
+	// First we need to determine the byte offset
+	std::unique_ptr<PangoLayoutIter, std::function<void(PangoLayoutIter*)>> itor(
+		pango_layout_get_iter(layout_.get()), pango_layout_iter_free);
+
+	// Go the wanted column.
+	for(std::size_t i = 0; i < column; ++i) {
+		if(!pango_layout_iter_next_char(itor.get())) {
+			// It seems that the documentation is wrong and causes and off by
+			// one error... the result should be false if already at the end of
+			// the data when started.
+			if(i + 1 == column) {
+				break;
+			}
+		}
+	}
+
+	// Get the byte offset
+	const int offset = pango_layout_iter_get_index(itor.get());
+	return offset;
+}
+
+point pango_text::get_cursor_position(const unsigned column, const unsigned line) const
 {
 	this->recalculate();
 
-	// First we need to determine the byte offset, if more routines need it it
-	// would be a good idea to make it a separate function.
+	// Determing byte offset
 	std::unique_ptr<PangoLayoutIter, std::function<void(PangoLayoutIter*)>> itor(
 		pango_layout_get_iter(layout_.get()), pango_layout_iter_free);
 
 	// Go the wanted line.
 	if(line != 0) {
-		if(pango_layout_get_line_count(layout_.get()) >= static_cast<int>(line)) {
+
+		if(static_cast<int>(line) >= pango_layout_get_line_count(layout_.get())) {
 			return point(0, 0);
 		}
 
@@ -179,7 +245,7 @@ point pango_text::get_cursor_position(
 			if(i + 1 == column) {
 				break;
 			}
-			// We are beyond data.
+			// Beyond data.
 			return point(0, 0);
 		}
 	}
@@ -191,7 +257,7 @@ point pango_text::get_cursor_position(
 	PangoRectangle rect;
 	pango_layout_get_cursor_pos(layout_.get(), offset, &rect, nullptr);
 
-	return point(PANGO_PIXELS(rect.x), PANGO_PIXELS(rect.y));
+	return to_draw_scale({PANGO_PIXELS(rect.x), PANGO_PIXELS(rect.y)});
 }
 
 std::size_t pango_text::get_maximum_length() const
@@ -292,26 +358,46 @@ bool pango_text::set_text(const std::string& text, const bool markedup)
 		if(text != narrow) {
 			ERR_GUI_L << "pango_text::" << __func__
 					<< " text '" << text
-					<< "' contains invalid utf-8, trimmed the invalid parts.\n";
+					<< "' contains invalid utf-8, trimmed the invalid parts.";
 		}
+
+		if (highlight_start_offset_ != highlight_end_offset_) {
+			/** Highlight */
+			PangoAttrList *attribute_list = pango_attr_list_new();
+			int col_r = highlight_color_.r / 255.0 * 65535.0;
+			int col_g = highlight_color_.g / 255.0 * 65535.0;
+			int col_b = highlight_color_.b / 255.0 * 65535.0;
+			DBG_GUI_D << "highlight start : " << highlight_start_offset_ << "end : " << highlight_end_offset_;
+			DBG_GUI_D << "highlight rgb : " << col_r << "," << col_g << "," << col_b;
+			PangoAttribute *attr = pango_attr_background_new(col_r, col_g, col_b);
+			attr->start_index = highlight_start_offset_;
+			attr->end_index = highlight_end_offset_;
+			pango_attr_list_insert(attribute_list, attr);
+
+			pango_layout_set_attributes(layout_.get(), attribute_list);
+		}
+
 		if(markedup) {
 			if(!this->set_markup(narrow, *layout_)) {
 				return false;
 			}
 		} else {
-			/*
-			 * pango_layout_set_text after pango_layout_set_markup might
-			 * leave the layout in an undefined state regarding markup so
-			 * clear it unconditionally.
-			 */
-			pango_layout_set_attributes(layout_.get(), nullptr);
+			if (highlight_start_offset_ == highlight_end_offset_) {
+				/*
+				 * pango_layout_set_text after pango_layout_set_markup might
+				 * leave the layout in an undefined state regarding markup so
+				 * clear it unconditionally.
+				 */
+				pango_layout_set_attributes(layout_.get(), nullptr);
+			}
+
 			pango_layout_set_text(layout_.get(), narrow.c_str(), narrow.size());
 		}
+
 		text_ = narrow;
 		length_ = wide.size();
 		markedup_text_ = markedup;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return true;
@@ -322,19 +408,18 @@ pango_text& pango_text::set_family_class(font::family_class fclass)
 	if(fclass != font_class_) {
 		font_class_ = fclass;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
 }
 
-pango_text& pango_text::set_font_size(const unsigned font_size)
+pango_text& pango_text::set_font_size(unsigned font_size)
 {
-	unsigned int actual_size = preferences::font_scaled(font_size);
-	if(actual_size != font_size_) {
-		font_size_ = actual_size;
+	font_size = preferences::font_scaled(font_size) * pixel_scale_;
+
+	if(font_size != font_size_) {
+		font_size_ = font_size;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -345,7 +430,6 @@ pango_text& pango_text::set_font_style(const pango_text::FONT_STYLE font_style)
 	if(font_style != font_style_) {
 		font_style_ = font_style;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -355,7 +439,6 @@ pango_text& pango_text::set_foreground_color(const color_t& color)
 {
 	if(color != foreground_color_) {
 		foreground_color_ = color;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -363,6 +446,8 @@ pango_text& pango_text::set_foreground_color(const color_t& color)
 
 pango_text& pango_text::set_maximum_width(int width)
 {
+	width *= pixel_scale_;
+
 	if(width <= 0) {
 		width = -1;
 	}
@@ -370,7 +455,6 @@ pango_text& pango_text::set_maximum_width(int width)
 	if(width != maximum_width_) {
 		maximum_width_ = width;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -382,7 +466,6 @@ pango_text& pango_text::set_characters_per_line(const unsigned characters_per_li
 		characters_per_line_ = characters_per_line;
 
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -390,6 +473,8 @@ pango_text& pango_text::set_characters_per_line(const unsigned characters_per_li
 
 pango_text& pango_text::set_maximum_height(int height, bool multiline)
 {
+	height *= pixel_scale_;
+
 	if(height <= 0) {
 		height = -1;
 		multiline = false;
@@ -406,7 +491,6 @@ pango_text& pango_text::set_maximum_height(int height, bool multiline)
 		pango_layout_set_height(layout_.get(), !multiline ? -1 : height * PANGO_SCALE);
 		maximum_height_ = height;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -420,7 +504,6 @@ pango_text& pango_text::set_ellipse_mode(const PangoEllipsizeMode ellipse_mode)
 		pango_layout_set_ellipsize(layout_.get(), ellipse_mode);
 		ellipse_mode_ = ellipse_mode;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	// According to the docs of pango_layout_set_height, the behavior is undefined if a height other than -1 is combined
@@ -438,7 +521,6 @@ pango_text &pango_text::set_alignment(const PangoAlignment alignment)
 	if (alignment != alignment_) {
 		pango_layout_set_alignment(layout_.get(), alignment);
 		alignment_ = alignment;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -461,7 +543,6 @@ pango_text& pango_text::set_link_aware(bool b)
 {
 	if (link_aware_ != b) {
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 		link_aware_ = b;
 	}
 	return *this;
@@ -472,7 +553,6 @@ pango_text& pango_text::set_link_color(const color_t& color)
 	if(color != link_color_) {
 		link_color_ = color;
 		calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -483,7 +563,6 @@ pango_text& pango_text::set_add_outline(bool do_add)
 	if(do_add != add_outline_) {
 		add_outline_ = do_add;
 		//calculation_dirty_ = true;
-		surface_dirty_ = true;
 	}
 
 	return *this;
@@ -506,17 +585,40 @@ int pango_text::get_max_glyph_height() const
 	pango_font_metrics_unref(m);
 	g_object_unref(f);
 
-	return ceil(pango_units_to_double(ascent + descent));
+	return ceil(pango_units_to_double(ascent + descent) / pixel_scale_);
+}
+
+void pango_text::update_pixel_scale()
+{
+	const int ps = video::get_pixel_scale();
+	if (ps == pixel_scale_) {
+		return;
+	}
+
+	font_size_ = (font_size_ / pixel_scale_) * ps;
+
+	if (maximum_width_ != -1) {
+		maximum_width_ = (maximum_width_ / pixel_scale_) * ps;
+	}
+
+	if (maximum_height_ != -1) {
+		maximum_height_ = (maximum_height_ / pixel_scale_) * ps;
+	}
+
+	calculation_dirty_ = true;
+	pixel_scale_ = ps;
 }
 
 void pango_text::recalculate() const
 {
+	// TODO: clean up this "const everything then mutable everything" mess.
+	// update_pixel_scale() should go in here. But it can't. Because things
+	// are declared const which are not const.
+
 	if(calculation_dirty_) {
 		assert(layout_ != nullptr);
 
 		calculation_dirty_ = false;
-		surface_dirty_ = true;
-
 		rect_ = calculate_size(*layout_);
 	}
 }
@@ -570,7 +672,7 @@ PangoRectangle pango_text::calculate_size(PangoLayout& layout) const
 		<< " text '" << gui2::debug_truncate(text_)
 		<< "' maximum_width " << maximum_width
 		<< " width " << size.x + size.width
-		<< ".\n";
+		<< ".";
 
 	DBG_GUI_L << "pango_text::" << __func__
 		<< " text '" << gui2::debug_truncate(text_)
@@ -580,14 +682,14 @@ PangoRectangle pango_text::calculate_size(PangoLayout& layout) const
 		<< " maximum_width " << maximum_width
 		<< " maximum_height " << maximum_height_
 		<< " result " << size
-		<< ".\n";
+		<< ".";
 
 	if(maximum_width != -1 && size.x + size.width > maximum_width) {
 		DBG_GUI_L << "pango_text::" << __func__
 			<< " text '" << gui2::debug_truncate(text_)
 			<< " ' width " << size.x + size.width
 			<< " greater as the wanted maximum of " << maximum_width
-			<< ".\n";
+			<< ".";
 	}
 
 	// The maximum height is handled here instead of using the library - see the comments in set_maximum_height()
@@ -596,7 +698,7 @@ PangoRectangle pango_text::calculate_size(PangoLayout& layout) const
 			<< " text '" << gui2::debug_truncate(text_)
 			<< " ' height " << size.y + size.height
 			<< " greater as the wanted maximum of " << maximum_height_
-			<< ".\n";
+			<< ".";
 		size.height = maximum_height_ - std::max(0, size.y);
 	}
 
@@ -610,9 +712,9 @@ PangoRectangle pango_text::calculate_size(PangoLayout& layout) const
  */
 struct inverse_table
 {
-	unsigned values[256];
+	unsigned values[256] {};
 
-	inverse_table()
+	constexpr inverse_table()
 	{
 		values[0] = 0;
 		for (int i = 1; i < 256; ++i) {
@@ -623,7 +725,7 @@ struct inverse_table
 	unsigned operator[](uint8_t i) const { return values[i]; }
 };
 
-static const inverse_table inverse_table_;
+static constexpr inverse_table inverse_table_;
 
 /***
  * Helper function for un-premultiplying alpha
@@ -656,17 +758,6 @@ static void from_cairo_format(uint32_t & c)
 	unpremultiply(r, div);
 	unpremultiply(g, div);
 	unpremultiply(b, div);
-
-#ifdef _WIN32
-	// Grayscale AA with ClearType results in wispy unreadable text because of gamma issues
-	// that would normally be solved by rendering directly onto the destination surface without
-	// alpha blending. However, since the current game engine design would never allow us to do
-	// that, we work around that by increasing alpha at the expense of AA accuracy (which is
-	// not particularly noticeable if you don't know what you're looking for anyway).
-	if(a < 255) {
-		a = std::clamp<unsigned>(unsigned(a) * 1.75, 0, 255);
-	}
-#endif
 
 	c = (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
 }
@@ -722,58 +813,58 @@ void pango_text::render(PangoLayout& layout, const SDL_Rect& viewport, const uns
 	pango_cairo_show_layout(cr.get(), &layout);
 }
 
-void pango_text::rerender(const SDL_Rect& viewport)
+surface pango_text::create_surface()
 {
-	if(surface_dirty_ || !SDL_RectEquals(&rendered_viewport_, &viewport)) {
-		assert(layout_.get());
-
-		this->recalculate();
-		surface_dirty_ = false;
-		rendered_viewport_ = viewport;
-
-		cairo_format_t format = CAIRO_FORMAT_ARGB32;
-		const int stride = cairo_format_stride_for_width(format, viewport.w);
-
-		// The width and stride can be zero if the text is empty or the stride can be negative to indicate an error from
-		// Cairo. Width isn't tested here because it's implied by stride.
-		if(stride <= 0 || viewport.h <= 0) {
-			surface_ = surface(0, 0);
-			surface_buffer_.clear();
-			return;
-		}
-
-		// Check to prevent arithmetic overflow when calculating (stride * height).
-		// The size of the viewport should already provide a far lower limit on the
-		// maximum size, but this is left in as a sanity check.
-		if(viewport.h > std::numeric_limits<int>::max() / stride) {
-			throw std::length_error("Text is too long to render");
-		}
-
-		// Resize buffer appropriately and set all pixel values to 0.
-		surface_ = nullptr; // Don't leave a dangling pointer to the old buffer
-		surface_buffer_.assign(viewport.h * stride, 0);
-
-		// Try rendering the whole text in one go. If this throws a length_error
-		// then leave it to the caller to handle; one reason it may throw is that
-		// cairo surfaces are limited to approximately 2**15 pixels in height.
-		render(*layout_, viewport, stride);
-
-		// The cairo surface is in CAIRO_FORMAT_ARGB32 which uses
-		// pre-multiplied alpha. SDL doesn't use that so the pixels need to be
-		// decoded again.
-		for(int y = 0; y < viewport.h; ++y) {
-			uint32_t* pixels = reinterpret_cast<uint32_t*>(&surface_buffer_[y * stride]);
-			for(int x = 0; x < viewport.w; ++x) {
-				from_cairo_format(pixels[x]);
-			}
-		}
-
-		surface_ = SDL_CreateRGBSurfaceWithFormatFrom(
-			&surface_buffer_[0], viewport.w, viewport.h, 32, stride, SDL_PIXELFORMAT_ARGB8888);
-	}
+	return create_surface({0, 0, rect_.x + rect_.width, rect_.y + rect_.height});
 }
 
-bool pango_text::set_markup(std::string_view text, PangoLayout& layout) {
+surface pango_text::create_surface(const SDL_Rect& viewport)
+{
+	assert(layout_.get());
+
+	cairo_format_t format = CAIRO_FORMAT_ARGB32;
+	const int stride = cairo_format_stride_for_width(format, viewport.w);
+
+	// The width and stride can be zero if the text is empty or the stride can be negative to indicate an error from
+	// Cairo. Width isn't tested here because it's implied by stride.
+	if(stride <= 0 || viewport.h <= 0) {
+		surface_buffer_.clear();
+		return nullptr;
+	}
+
+	DBG_FT << "creating new text surface";
+
+	// Check to prevent arithmetic overflow when calculating (stride * height).
+	// The size of the viewport should already provide a far lower limit on the
+	// maximum size, but this is left in as a sanity check.
+	if(viewport.h > std::numeric_limits<int>::max() / stride) {
+		throw std::length_error("Text is too long to render");
+	}
+
+	// Resize buffer appropriately and set all pixel values to 0.
+	surface_buffer_.assign(viewport.h * stride, 0);
+
+	// Try rendering the whole text in one go. If this throws a length_error
+	// then leave it to the caller to handle; one reason it may throw is that
+	// cairo surfaces are limited to approximately 2**15 pixels in height.
+	render(*layout_, viewport, stride);
+
+	// The cairo surface is in CAIRO_FORMAT_ARGB32 which uses
+	// pre-multiplied alpha. SDL doesn't use that so the pixels need to be
+	// decoded again.
+	for(int y = 0; y < viewport.h; ++y) {
+		uint32_t* pixels = reinterpret_cast<uint32_t*>(&surface_buffer_[y * stride]);
+		for(int x = 0; x < viewport.w; ++x) {
+			from_cairo_format(pixels[x]);
+		}
+	}
+
+	return SDL_CreateRGBSurfaceWithFormatFrom(
+		&surface_buffer_[0], viewport.w, viewport.h, 32, stride, SDL_PIXELFORMAT_ARGB8888);
+}
+
+bool pango_text::set_markup(std::string_view text, PangoLayout& layout)
+{
 	char* raw_text;
 	std::string semi_escaped;
 	bool valid = validate_markup(text, &raw_text, semi_escaped);
@@ -791,7 +882,7 @@ bool pango_text::set_markup(std::string_view text, PangoLayout& layout) {
 	} else {
 		ERR_GUI_L << "pango_text::" << __func__
 			<< " text '" << text
-			<< "' has broken markup, set to normal text.\n";
+			<< "' has broken markup, set to normal text.";
 		set_text(_("The text contains invalid Pango markup: ") + std::string(text), false);
 	}
 
@@ -873,7 +964,7 @@ bool pango_text::validate_markup(std::string_view text, char** raw_text, std::st
 	/* Replacement worked, still warn the user about the error. */
 	WRN_GUI_L << "pango_text::" << __func__
 			<< " text '" << text
-			<< "' has unescaped ampersands '&', escaped them.\n";
+			<< "' has unescaped ampersands '&', escaped them.";
 
 	return true;
 }
@@ -928,3 +1019,30 @@ int get_max_height(unsigned size, font::family_class fclass, pango_text::FONT_ST
 }
 
 } // namespace font
+
+namespace std
+{
+std::size_t hash<font::pango_text>::operator()(const font::pango_text& t) const
+{
+	std::size_t hash = 0;
+
+	boost::hash_combine(hash, t.text_);
+	boost::hash_combine(hash, t.font_class_);
+	boost::hash_combine(hash, t.font_size_);
+	boost::hash_combine(hash, t.font_style_);
+	boost::hash_combine(hash, t.foreground_color_.to_rgba_bytes());
+	boost::hash_combine(hash, t.rect_.width);
+	boost::hash_combine(hash, t.rect_.height);
+	boost::hash_combine(hash, t.maximum_width_);
+	boost::hash_combine(hash, t.maximum_height_);
+	boost::hash_combine(hash, t.alignment_);
+	boost::hash_combine(hash, t.ellipse_mode_);
+	boost::hash_combine(hash, t.add_outline_);
+	boost::hash_combine(hash, t.highlight_start_offset_);
+	boost::hash_combine(hash, t.highlight_end_offset_);
+	boost::hash_combine(hash, t.highlight_color_.to_rgba_bytes());
+
+	return hash;
+}
+
+} // namespace std

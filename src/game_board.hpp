@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2014 - 2021
+	Copyright (C) 2014 - 2024
 	by Chris Beck <render787@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -16,13 +16,14 @@
 #pragma once
 
 #include "display_context.hpp"
+#include "side_controller.hpp"
 #include "team.hpp"
 #include "terrain/translation.hpp"
 #include "terrain/type_data.hpp"
 #include "units/map.hpp"
 #include "units/id.hpp"
-#include <optional>
 
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -152,7 +153,7 @@ public:
 
 	// Manipulator from playturn
 
-	void side_drop_to (int side_num, team::CONTROLLER ctrl, team::PROXY_CONTROLLER proxy = team::PROXY_CONTROLLER::PROXY_HUMAN);
+	void side_drop_to (int side_num, side_controller::type ctrl, side_proxy_controller::type proxy = side_proxy_controller::type::human);
 	void side_change_controller (int side_num, bool is_local, const std::string& pname, const std::string& controller_type);
 
 	// Manipulator from actionwml
@@ -228,15 +229,8 @@ private:
  */
 struct temporary_unit_mover
 {
-	temporary_unit_mover(unit_map& m, const map_location& src,
-	                     const map_location& dst, int new_moves);
-	temporary_unit_mover(unit_map& m, const map_location& src,
-	                     const map_location& dst);
-	temporary_unit_mover(game_board& b, const map_location& src,
-	                     const map_location& dst, int new_moves);
-	temporary_unit_mover(game_board& b, const map_location& src,
-	                     const map_location& dst);
-	virtual  ~temporary_unit_mover();
+	temporary_unit_mover(unit_map& m, const map_location& src, const map_location& dst, int new_moves, bool stand);
+	virtual ~temporary_unit_mover();
 
 private:
 	unit_map& m_;
@@ -244,4 +238,5 @@ private:
 	const map_location dst_;
 	int old_moves_;
 	unit_ptr temp_;
+	bool stand_;
 };

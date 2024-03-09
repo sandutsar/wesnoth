@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2006 - 2021
+	Copyright (C) 2006 - 2024
 	by Joerg Hinrichs <joerg.hinrichs@alice-dsl.de>
 	Copyright (C) 2003 by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
@@ -38,8 +38,13 @@ namespace events
 class mouse_handler;
 }
 
-struct fallback_ai_to_human_exception : public lua_jailbreak_exception
+struct fallback_ai_to_human_exception final : public lua_jailbreak_exception
 {
+	fallback_ai_to_human_exception() : lua_jailbreak_exception()
+	{
+		this->store();
+	}
+
 	IMPLEMENT_LUA_JAILBREAK_EXCEPTION(fallback_ai_to_human_exception)
 };
 
@@ -96,7 +101,7 @@ public:
 	void user_command();
 	void custom_command();
 	void ai_formula();
-	void clear_messages();
+	virtual void clear_messages() override;
 	std::vector<std::string> get_commands_list();
 
 	unit_map::iterator current_unit();
@@ -139,7 +144,6 @@ private:
 	friend class console_handler;
 
 	// void do_speak(const std::string& message, bool allies_only);
-	// std::vector<std::string> create_unit_table(const statistics::stats::str_int_map& m,unsigned int team);
 	bool has_friends() const;
 
 	game_display* gui_;

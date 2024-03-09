@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2017 - 2021
+	Copyright (C) 2017 - 2024
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
 	This program is free software; you can redistribute it and/or modify
@@ -33,7 +33,8 @@ namespace gui2::dialogs
 REGISTER_DIALOG(log_settings)
 
 log_settings::log_settings()
-	: last_words_()
+	: modal_dialog(window_id())
+	, last_words_()
 {
 	//list of names must match those in logging.cfg
 	widget_id_.push_back("none");
@@ -44,7 +45,7 @@ log_settings::log_settings()
 
 
 	//empty string is the filter (in other words, this grabs the whole list of domains)
-	std::string temp_string = lg::list_logdomains("");
+	std::string temp_string = lg::list_log_domains("");
 	//std::cout<<temp_string; //use to print the full log domain list
 	std::string one_domain;
 
@@ -57,14 +58,12 @@ log_settings::log_settings()
 
 void log_settings::pre_show(window& window)
 {
-	set_restore(true); //why is this done manually?
-
 	listbox& logger_box = find_widget<listbox>(&window, "logger_listbox", false);
 
 	for(unsigned int i = 0; i < domain_list_.size(); i++){
 		std::string this_domain = domain_list_[i];
-		std::map<std::string, string_map> data;
-		string_map item;
+		widget_data data;
+		widget_item item;
 
 		item["label"] = this_domain;
 		data["label"] = item;
@@ -80,10 +79,11 @@ void log_settings::pre_show(window& window)
 				group.add_member(button, this_id);
 			}
 		}
-		int current_sev, max_sev = widget_id_.size();
+		lg::severity current_sev;
+        lg::severity max_sev = lg::severity::LG_DEBUG;
 		if (lg::get_log_domain_severity(this_domain, current_sev)) {
 			if (current_sev <= max_sev) {
-				group.set_member_states(widget_id_[current_sev + 1]);
+				group.set_member_states(widget_id_[static_cast<int>(current_sev) + 1]);
 			}
 		}
 	}
@@ -151,7 +151,7 @@ void log_settings::set_logger(const std::string log_domain)
 	} else if(active_value == widget_id_[1]){ //level0: error
 		lg::set_log_domain_severity(log_domain, lg::err());
 	} else if(active_value == widget_id_[0]){ //level-1: disable
-		lg::set_log_domain_severity(log_domain, -1);
+		lg::set_log_domain_severity(log_domain, lg::severity::LG_NONE);
 	}
 }
 

@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2017 - 2021
+	Copyright (C) 2017 - 2024
 	by Charles Dang <exodia339@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -38,6 +38,9 @@ public:
 	 */
 	DEFINE_SIMPLE_DISPLAY_WRAPPER(outro)
 
+	/** TLD override to update animations, called once per frame */
+	virtual void update() override;
+
 private:
 	virtual const std::string& window_id() const override;
 
@@ -45,13 +48,13 @@ private:
 
 	virtual void post_show(window& window) override;
 
-	void draw_callback();
-
 	std::vector<std::string> text_;
-	std::vector<std::string>::iterator current_text_;
+	std::string current_text_;
+	std::size_t text_index_;
 
 	unsigned int duration_;
-	int fade_step_;
+	int fade_alpha_;
+	uint32_t fade_start_;
 
 	bool fading_in_;
 

@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -40,6 +40,7 @@ text_box_base::text_box_base(const implementation::builder_styled_widget& builde
 	, text_()
 	, selection_start_(0)
 	, selection_length_(0)
+	, editable_(true)
 	, ime_composing_(false)
 	, ime_start_point_(0)
 	, cursor_timer_(0)
@@ -48,7 +49,7 @@ text_box_base::text_box_base(const implementation::builder_styled_widget& builde
 	, text_changed_callback_()
 {
 	auto cfg = get_control(control_type, builder.definition);
-	text_.set_family_class(cfg->text_font_family);
+	set_font_family(cfg->text_font_family);
 
 #ifdef __unix__
 	// pastes on UNIX systems.
@@ -116,7 +117,7 @@ void text_box_base::set_maximum_length(const std::size_t maximum_length)
 			selection_length_ = maximum_length - selection_start_;
 		}
 		update_canvas();
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
@@ -129,7 +130,7 @@ void text_box_base::set_value(const std::string& text)
 		selection_start_ = text_.get_length();
 		selection_length_ = 0;
 		update_canvas();
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
@@ -150,20 +151,28 @@ void text_box_base::set_cursor(const std::size_t offset, const bool select)
 		copy_selection(true);
 #endif
 		update_canvas();
-		set_is_dirty(true);
+		queue_redraw();
 
 	} else {
-		assert(offset <= text_.get_length());
-		selection_start_ = offset;
+		if (offset <= text_.get_length()) {
+			selection_start_ = offset;
+		} else {
+			selection_start_ = 0;
+		}
 		selection_length_ = 0;
 
 		update_canvas();
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
 void text_box_base::insert_char(const std::string& unicode)
 {
+	if(!editable_)
+	{
+		return;
+	}
+
 	delete_selection();
 
 	if(text_.insert_text(selection_start_, unicode)) {
@@ -171,7 +180,7 @@ void text_box_base::insert_char(const std::string& unicode)
 		// Update status
 		set_cursor(selection_start_ + utf8::size(unicode), false);
 		update_canvas();
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
@@ -220,6 +229,11 @@ void text_box_base::copy_selection(const bool mouse)
 
 void text_box_base::paste_selection(const bool mouse)
 {
+	if(!editable_)
+	{
+		return;
+	}
+
 	const std::string& text = desktop::clipboard::copy_from_clipboard(mouse);
 	if(text.empty()) {
 		return;
@@ -230,7 +244,7 @@ void text_box_base::paste_selection(const bool mouse)
 	selection_start_ += text_.insert_text(selection_start_, text);
 
 	update_canvas();
-	set_is_dirty(true);
+	queue_redraw();
 	fire(event::NOTIFY_MODIFIED, *this, nullptr);
 }
 
@@ -238,7 +252,7 @@ void text_box_base::set_selection_start(const std::size_t selection_start)
 {
 	if(selection_start != selection_start_) {
 		selection_start_ = selection_start;
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
@@ -246,7 +260,7 @@ void text_box_base::set_selection_length(const int selection_length)
 {
 	if(selection_length != selection_length_) {
 		selection_length_ = selection_length;
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
@@ -286,7 +300,7 @@ void text_box_base::set_state(const state_t state)
 {
 	if(state != state_) {
 		state_ = state;
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
@@ -316,7 +330,8 @@ void text_box_base::cursor_timer_callback()
 			cursor_alpha_ = 255;
 			return;
 		default:
-			if(get_window() != open_window_stack.back()) {
+			// back() on an empty vector is UB and was causing a crash when run on Wayland (see #7104 on github)
+			if(!open_window_stack.empty() && get_window() != open_window_stack.back()) {
 				cursor_alpha_ = 0;
 			} else {
 				cursor_alpha_ = (~cursor_alpha_) & 0xFF;
@@ -331,7 +346,7 @@ void text_box_base::cursor_timer_callback()
 		tmp.set_variable("cursor_alpha", wfl::variant(cursor_alpha_));
 	}
 
-	set_is_dirty(true);
+	queue_redraw();
 }
 
 void text_box_base::reset_cursor_state()
@@ -353,7 +368,7 @@ void text_box_base::reset_cursor_state()
 void text_box_base::handle_key_left_arrow(SDL_Keymod modifier, bool& handled)
 {
 	/** @todo implement the ctrl key. */
-	DBG_GUI_E << LOG_SCOPE_HEADER << '\n';
+	DBG_GUI_E << LOG_SCOPE_HEADER;
 
 	handled = true;
 	const int offset = selection_start_ - 1 + selection_length_;
@@ -365,7 +380,7 @@ void text_box_base::handle_key_left_arrow(SDL_Keymod modifier, bool& handled)
 void text_box_base::handle_key_right_arrow(SDL_Keymod modifier, bool& handled)
 {
 	/** @todo implement the ctrl key. */
-	DBG_GUI_E << LOG_SCOPE_HEADER << '\n';
+	DBG_GUI_E << LOG_SCOPE_HEADER;
 
 	handled = true;
 	const std::size_t offset = selection_start_ + 1 + selection_length_;
@@ -376,7 +391,7 @@ void text_box_base::handle_key_right_arrow(SDL_Keymod modifier, bool& handled)
 
 void text_box_base::handle_key_home(SDL_Keymod modifier, bool& handled)
 {
-	DBG_GUI_E << LOG_SCOPE_HEADER << '\n';
+	DBG_GUI_E << LOG_SCOPE_HEADER;
 
 	handled = true;
 	if(modifier & KMOD_CTRL) {
@@ -388,7 +403,7 @@ void text_box_base::handle_key_home(SDL_Keymod modifier, bool& handled)
 
 void text_box_base::handle_key_end(SDL_Keymod modifier, bool& handled)
 {
-	DBG_GUI_E << LOG_SCOPE_HEADER << '\n';
+	DBG_GUI_E << LOG_SCOPE_HEADER;
 
 	handled = true;
 	if(modifier & KMOD_CTRL) {
@@ -400,7 +415,7 @@ void text_box_base::handle_key_end(SDL_Keymod modifier, bool& handled)
 
 void text_box_base::handle_key_backspace(SDL_Keymod /*modifier*/, bool& handled)
 {
-	DBG_GUI_E << LOG_SCOPE_HEADER << '\n';
+	DBG_GUI_E << LOG_SCOPE_HEADER;
 
 	handled = true;
 	if(selection_length_ != 0) {
@@ -418,7 +433,7 @@ void text_box_base::handle_key_backspace(SDL_Keymod /*modifier*/, bool& handled)
 
 void text_box_base::handle_key_delete(SDL_Keymod /*modifier*/, bool& handled)
 {
-	DBG_GUI_E << LOG_SCOPE_HEADER << '\n';
+	DBG_GUI_E << LOG_SCOPE_HEADER;
 
 	handled = true;
 	if(selection_length_ != 0) {
@@ -436,7 +451,7 @@ void text_box_base::handle_key_delete(SDL_Keymod /*modifier*/, bool& handled)
 
 void text_box_base::handle_commit(bool& handled, const std::string& unicode)
 {
-	DBG_GUI_E << LOG_SCOPE_HEADER << '\n';
+	DBG_GUI_E << LOG_SCOPE_HEADER;
 
 	if(unicode.size() > 1 || unicode[0] != 0) {
 		handled = true;
@@ -501,14 +516,14 @@ void text_box_base::handle_editing(bool& handled, const std::string& unicode, in
 			set_cursor(std::min(maximum_length, ime_start_point_ + start + len), true);
 		}
 		update_canvas();
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
 void text_box_base::signal_handler_middle_button_click(const event::ui_event event,
 												bool& handled)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	paste_selection(true);
 
@@ -521,7 +536,7 @@ void text_box_base::signal_handler_sdl_key_down(const event::ui_event event,
 										 SDL_Keymod modifier)
 {
 
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 /*
  * For copy, cut and paste we use a different key on the MAC. Even for 'select
@@ -583,17 +598,28 @@ void text_box_base::signal_handler_sdl_key_down(const event::ui_event event,
 			break;
 
 		case SDLK_BACKSPACE:
+			if (!is_editable())
+			{
+				return;
+			}
+
 			handle_key_backspace(modifier, handled);
 			break;
 
 		case SDLK_u:
-			if(!(modifier & KMOD_CTRL)) {
+			if( !(modifier & KMOD_CTRL) || !is_editable() ) {
 				return;
 			}
+
 			handle_key_clear_line(modifier, handled);
 			break;
 
 		case SDLK_DELETE:
+			if (!is_editable())
+			{
+				return;
+			}
+
 			handle_key_delete(modifier, handled);
 			break;
 
@@ -609,17 +635,20 @@ void text_box_base::signal_handler_sdl_key_down(const event::ui_event event,
 			break;
 
 		case SDLK_x:
-			if(!(modifier & modifier_key)) {
+			if( !(modifier & modifier_key) ) {
 				return;
 			}
 
 			copy_selection(false);
-			delete_selection();
+
+			if ( is_editable() ) {
+				delete_selection();
+			}
 			handled = true;
 			break;
 
 		case SDLK_v:
-			if(!(modifier & modifier_key)) {
+			if( !(modifier & modifier_key) || !is_editable() ) {
 				return;
 			}
 
@@ -629,11 +658,14 @@ void text_box_base::signal_handler_sdl_key_down(const event::ui_event event,
 
 		case SDLK_RETURN:
 		case SDLK_KP_ENTER:
-			if(!is_composing() || (modifier & (KMOD_CTRL | KMOD_ALT | KMOD_GUI | KMOD_SHIFT))) {
-				return;
-			}
-			// The IME will handle it, we just need to make sure nothing else handles it too.
-			handled = true;
+
+//	TODO: check if removing the following check causes any side effects
+//	To be removed if there aren't any text rendering problems.
+//			if(!is_composing()) {
+//				return;
+//			}
+
+			handle_key_enter(modifier, handled);
 			break;
 
 		case SDLK_ESCAPE:
@@ -642,6 +674,10 @@ void text_box_base::signal_handler_sdl_key_down(const event::ui_event event,
 			}
 			interrupt_composition();
 			handled = true;
+			break;
+
+		case SDLK_TAB:
+			handle_key_tab(modifier, handled);
 			break;
 
 		default:
@@ -656,14 +692,14 @@ void text_box_base::signal_handler_sdl_key_down(const event::ui_event event,
 
 void text_box_base::signal_handler_receive_keyboard_focus(const event::ui_event event)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	set_state(FOCUSED);
 }
 
 void text_box_base::signal_handler_lose_keyboard_focus(const event::ui_event event)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	set_state(ENABLED);
 }
@@ -671,7 +707,7 @@ void text_box_base::signal_handler_lose_keyboard_focus(const event::ui_event eve
 void text_box_base::signal_handler_mouse_enter(const event::ui_event event,
 											   bool& handled)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	if(state_ != FOCUSED) {
 		set_state(HOVERED);
@@ -685,7 +721,7 @@ void text_box_base::signal_handler_mouse_enter(const event::ui_event event,
 void text_box_base::signal_handler_mouse_leave(const event::ui_event event,
 											   bool& handled)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	if(state_ != FOCUSED) {
 		set_state(ENABLED);

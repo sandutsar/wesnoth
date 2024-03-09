@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2003 - 2021
+	Copyright (C) 2003 - 2024
 	by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -82,16 +82,30 @@ public:
 	bool has_special(const std::string& special, bool simple_check=false, bool special_id=true, bool special_tags=true) const;
 	unit_ability_list get_specials(const std::string& special) const;
 	std::vector<std::pair<t_string, t_string>> special_tooltips(boost::dynamic_bitset<>* active_list = nullptr) const;
-	std::string weapon_specials(bool only_active=false, bool is_backstab=false) const;
+	std::string weapon_specials() const;
+	std::string weapon_specials_value(const std::set<std::string> checking_tags) const;
 
 	/** Calculates the number of attacks this weapon has, considering specials. */
-	void modified_attacks(bool is_backstab, unsigned & min_attacks,
+	void modified_attacks(unsigned & min_attacks,
 	                      unsigned & max_attacks) const;
+
+	/** return a modified damage type and/or add a secondary_type for hybrid use if special is active. */
+	std::pair<std::string, std::string> damage_type() const;
+
 	/** Returns the damage per attack of this weapon, considering specials. */
-	int modified_damage(bool is_backstab) const;
+	int modified_damage() const;
+
+	/** Return the special weapon value, considering specials.
+	 * @param abil_list The list of special checked.
+	 * @param base_value The value modified or not by function.
+	 */
+	int composite_value(const unit_ability_list& abil_list, int base_value) const;
 	/** Returns list for weapon like abilities for each ability type. */
 	unit_ability_list get_weapon_ability(const std::string& ability) const;
-	/** Returns list who contains get_weapon_ability and get_specials list for each ability type */
+	/**
+	 * @param special the tag name to check for
+	 * @return list which contains get_weapon_ability and get_specials list for each ability type, with overwritten items removed
+	 */
 	unit_ability_list get_specials_and_abilities(const std::string& special) const;
 	/** used for abilities used like weapon
 	 * @return True if the ability @a special is active.
@@ -110,12 +124,14 @@ public:
 
 	// In unit_types.cpp:
 
-	bool matches_filter(const config& filter) const;
+	bool matches_filter(const config& filter, const std::string& tag_name = "") const;
 	bool apply_modification(const config& cfg);
 	bool describe_modification(const config& cfg,std::string* description);
 
 	int movement_used() const { return movement_used_; }
 	void set_movement_used(int value) { movement_used_ = value; }
+	int attacks_used() const { return attacks_used_; }
+	void set_attacks_used(int value) { attacks_used_ = value; }
 
 	void write(config& cfg) const;
 	inline config to_config() const { config c; write(c); return c; }
@@ -126,13 +142,23 @@ private:
 
 	// Configured as a bit field, in case that is useful.
 	enum AFFECTS { AFFECT_SELF=1, AFFECT_OTHER=2, AFFECT_EITHER=3 };
-	/** overwrite_special_checking : return an unit_ability_list list after checking presence or not of overwrite_specials
-	 * @param ability The special ability type who is being checked.
-	 * @param temp_list the list checked and returned.
-	 * @param abil_list list checked for verify presence of overwrite_specials .
-	 * @param filter_self name of [filter_"self/student"] if is abilities or specials who are checked
+	/**
+	 * Filter a list of abilities or weapon specials, removing any entries that don't own
+	 * the overwrite_specials attributes.
+	 *
+	 * @param overwriters list that may have overwrite_specials attributes.
+	 * @param tag_name type of abilitie/special checked.
 	 */
-	unit_ability_list overwrite_special_checking(const std::string& ability, unit_ability_list temp_list, const unit_ability_list& abil_list, const std::string& filter_self = "filter_self") const;
+	unit_ability_list overwrite_special_overwriter(unit_ability_list overwriters, const std::string& tag_name) const;
+	/**
+	 * Check whether @a cfg would be overwritten by any element of @a overwriters.
+	 *
+	 * @return True if element checked is overwritable.
+	 * @param overwriters list used for check if element is overwritable.
+	 * @param cfg element checked.
+	 * @param tag_name type of abilitie/special checked.
+	 */
+	bool overwrite_special_checking(unit_ability_list& overwriters, const config& cfg, const std::string& tag_name) const;
 	/** check_self_abilities : return an boolean value for checking of activities of abilities used like weapon
 	 * @return True if the special @a special is active.
 	 * @param cfg the config to one special ability checked.
@@ -148,8 +174,43 @@ private:
 	 */
 	bool check_adj_abilities(const config& cfg, const std::string& special, int dir, const unit& from) const;
 	bool special_active(const config& special, AFFECTS whom, const std::string& tag_name,
-	                    bool include_backstab=true, const std::string& filter_self ="filter_self") const;
+	                    const std::string& filter_self ="filter_self") const;
 
+/** weapon_specials_impl_self and weapon_specials_impl_adj : check if special name can be added.
+	 * @param[in,out] temp_string the string modified and returned
+	 * @param[in] self the unit checked.
+	 * @param[in] self_attack the attack used by unit checked in this function.
+	 * @param[in] other_attack the attack used by opponent to unit checked.
+	 * @param[in] self_loc location of the unit checked.
+	 * @param[in] whom determine if unit affected or not by special ability.
+	 * @param[in,out] checking_name the reference for checking if a name is already added
+	 * @param[in] checking_tags the reference for checking if special ability type can be used
+	 * @param[in] leader_bool If true, [leadership] abilities are checked.
+	 */
+	static void weapon_specials_impl_self(
+		std::string& temp_string,
+		unit_const_ptr self,
+		const_attack_ptr self_attack,
+		const_attack_ptr other_attack,
+		const map_location& self_loc,
+		AFFECTS whom,
+		std::set<std::string>& checking_name,
+		const std::set<std::string>& checking_tags={},
+		bool leader_bool=false
+	);
+
+	static void weapon_specials_impl_adj(
+		std::string& temp_string,
+		unit_const_ptr self,
+		const_attack_ptr self_attack,
+		const_attack_ptr other_attack,
+		const map_location& self_loc,
+		AFFECTS whom,
+		std::set<std::string>& checking_name,
+		const std::set<std::string>& checking_tags={},
+		const std::string& affect_adjacents="",
+		bool leader_bool=false
+	);
 	/** check_self_abilities_impl : return an boolean value for checking of activities of abilities used like weapon
 	 * @return True if the special @a tag_name is active.
 	 * @param self_attack the attack used by unit checked in this function.
@@ -205,7 +266,6 @@ private:
 		const config& special,
 		AFFECTS whom,
 		const std::string& tag_name,
-		bool include_backstab=true,
 		const std::string& filter_self ="filter_self"
 	);
 
@@ -279,6 +339,7 @@ private:
 
 	int accuracy_;
 	int movement_used_;
+	int attacks_used_;
 	int parry_;
 	config specials_;
 	bool changed_;

@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -18,7 +18,6 @@
 #include "gui/widgets/scrollbar.hpp"
 
 #include "gui/core/widget_definition.hpp"
-#include "gui/core/window_builder.hpp"
 
 namespace gui2
 {
@@ -127,7 +126,7 @@ struct builder_horizontal_scrollbar : public builder_styled_widget
 
 	using builder_styled_widget::build;
 
-	virtual widget* build() const override;
+	virtual std::unique_ptr<widget> build() const override;
 };
 
 } // namespace implementation

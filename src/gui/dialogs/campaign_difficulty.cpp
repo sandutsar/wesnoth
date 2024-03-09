@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2010 - 2021
+	Copyright (C) 2010 - 2024
 	by Iris Morelle <shadowm2006@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -18,15 +18,16 @@
 #include "gui/dialogs/campaign_difficulty.hpp"
 
 #include "config.hpp"
+#include "deprecation.hpp"
 #include "font/text_formatting.hpp"
 #include "formatter.hpp"
+#include "game_version.hpp"
 #include "gui/auxiliary/find_widget.hpp"
-#include "preferences/game.hpp"
 #include "gui/widgets/listbox.hpp"
 #include "gui/widgets/window.hpp"
 #include "log.hpp"
+#include "preferences/game.hpp"
 #include "serialization/string_utils.hpp"
-#include "deprecation.hpp"
 
 static lg::log_domain log_wml("wml");
 #define WRN_WML LOG_STREAM(warn, log_wml)
@@ -55,11 +56,11 @@ config generate_difficulty_config(const config& source)
 }
 
 campaign_difficulty::campaign_difficulty(const config& campaign)
-	: difficulties_(generate_difficulty_config(campaign))
+	: modal_dialog(window_id())
+	, difficulties_(generate_difficulty_config(campaign))
 	, campaign_id_(campaign["id"])
 	, selected_difficulty_("CANCEL")
 {
-	set_restore(true);
 }
 
 void campaign_difficulty::pre_show(window& window)
@@ -67,9 +68,11 @@ void campaign_difficulty::pre_show(window& window)
 	listbox& list = find_widget<listbox>(&window, "listbox", false);
 	window.keyboard_capture(&list);
 
+	unsigned difficulty_count = 0;
+	const unsigned difficulty_max = difficulties_.child_count("difficulty");
 	for(const config& d : difficulties_.child_range("difficulty")) {
-		std::map<std::string, string_map> data;
-		string_map item;
+		widget_data data;
+		widget_item item;
 
 		item["label"] = d["image"];
 		data.emplace("icon", item);
@@ -98,10 +101,24 @@ void campaign_difficulty::pre_show(window& window)
 			list.select_last_row();
 		}
 
-		widget* widget = grid.find("victory", false);
-		if(widget && !preferences::is_campaign_completed(campaign_id_, d["define"])) {
-			widget->set_visible(widget::visibility::hidden);
+		styled_widget& widget = find_widget<styled_widget>(&grid, "victory", false);
+		if(preferences::is_campaign_completed(campaign_id_, d["define"])) {
+			// Use different laurels according to the difficulty level, following the
+			// pre-existing convention established in campaign_selection class.
+			// Assumes ascending order of difficulty and gold laurel is set first
+			// in case there is only one difficulty setting.
+			if(difficulty_count + 1 >= difficulty_max) {
+				widget.set_label(game_config::images::victory_laurel_hardest);
+			} else if(difficulty_count == 0) {
+				widget.set_label(game_config::images::victory_laurel_easy);
+			} else {
+				widget.set_label(game_config::images::victory_laurel);
+			}
+		} else {
+			widget.set_visible(widget::visibility::hidden);
 		}
+
+		difficulty_count++;
 	}
 }
 
@@ -109,7 +126,7 @@ void campaign_difficulty::post_show(window& window)
 {
 	if(get_retval() == retval::OK) {
 		listbox& list = find_widget<listbox>(&window, "listbox", false);
-		selected_difficulty_ = difficulties_.child("difficulty", list.get_selected_row())["define"].str();
+		selected_difficulty_ = difficulties_.mandatory_child("difficulty", list.get_selected_row())["define"].str();
 	}
 }
 } // namespace dialogs

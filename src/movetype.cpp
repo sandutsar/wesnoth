@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2014 - 2021
+	Copyright (C) 2014 - 2024
 	by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -283,7 +283,7 @@ int movetype::terrain_info::data::calc_value(
 		ERR_CF << "infinite terrain_info recursion on "
 		       << (params_.use_move ? "movement" : "defense") << ": "
 			   << t_translation::write_terrain_code(terrain)
-			   << " depth " << recurse_count << '\n';
+			   << " depth " << recurse_count;
 		return params_.default_value;
 	}
 
@@ -320,14 +320,14 @@ int movetype::terrain_info::data::calc_value(
 			WRN_CF << "Terrain '" << terrain << "' has evaluated to " << result
 				   << " (" << (params_.use_move ? "cost" : "defense")
 			       << "), which is less than " << params_.min_value
-			       << "; resetting to " << params_.min_value << ".\n";
+			       << "; resetting to " << params_.min_value << ".";
 			result = params_.min_value;
 		}
 		if ( result > params_.max_value ) {
 			WRN_CF << "Terrain '" << terrain << "' has evaluated to " << result
 				   << " (" << (params_.use_move ? "cost" : "defense")
 				   << "), which is more than " << params_.max_value
-			       << "; resetting to " << params_.max_value << ".\n";
+			       << "; resetting to " << params_.max_value << ".";
 			result = params_.max_value;
 		}
 
@@ -726,9 +726,9 @@ void movetype::terrain_defense::merge(const config & new_data, bool overwrite)
 /**
  * Returns a map from attack types to resistances.
  */
-utils::string_map movetype::resistances::damage_table() const
+utils::string_map_res movetype::resistances::damage_table() const
 {
-	utils::string_map result;
+	utils::string_map_res result;
 
 	for (const config::attribute & attrb : cfg_.attribute_range()) {
 		result[attrb.first] = attrb.second;
@@ -743,7 +743,12 @@ utils::string_map movetype::resistances::damage_table() const
  */
 int movetype::resistances::resistance_against(const attack_type & attack) const
 {
-	return cfg_[attack.type()].to_int(100);
+	std::pair<std::string, std::string> types = attack.damage_type();
+	int res = resistance_against(types.first);
+	if(!(types.second).empty()){
+		res = std::max(res, resistance_against(types.second));
+	}
+	return res;
 }
 
 
@@ -868,10 +873,6 @@ bool movetype::has_terrain_defense_caps(const std::set<t_translation::terrain_co
 	return false;
 }
 
-/**
- * Merges the given config over the existing data.
- * If @a overwrite is false, the new values will be added to the old.
- */
 void movetype::merge(const config & new_cfg, bool overwrite)
 {
 	for (const auto & applies_to : movetype::effects) {
@@ -906,7 +907,7 @@ void movetype::merge(const config & new_cfg, const std::string & applies_to, boo
 		resist_.merge(new_cfg, overwrite);
 	}
 	else {
-		ERR_CF << "movetype::merge with unknown applies_to: " << applies_to << std::endl;
+		ERR_CF << "movetype::merge with unknown applies_to: " << applies_to;
 	}
 }
 
@@ -916,10 +917,7 @@ void movetype::merge(const config & new_cfg, const std::string & applies_to, boo
 const std::set<std::string> movetype::effects {"movement_costs",
 	"vision_costs", "jamming_costs", "defense", "resistance"};
 
-/**
- * Writes the movement type data to the provided config.
- */
-void movetype::write(config & cfg) const
+void movetype::write(config& cfg, bool include_notes) const
 {
 	movement_.write(cfg, "movement_costs", false);
 	vision_.write(cfg, "vision_costs", false);
@@ -927,10 +925,12 @@ void movetype::write(config & cfg) const
 	defense_.write(cfg, "defense");
 	resist_.write(cfg, "resistance");
 
-	if ( flying_ )
+	if(flying_)
 		cfg["flying"] = true;
 
-	for(const auto& note : special_notes_) {
-		cfg.add_child("special_note", config{"note", note});
+	if(include_notes) {
+		for(const auto& note : special_notes_) {
+			cfg.add_child("special_note", config{"note", note});
+		}
 	}
 }

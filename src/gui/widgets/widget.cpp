@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2007 - 2021
+	Copyright (C) 2007 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -15,6 +15,8 @@
 
 #define GETTEXT_DOMAIN "wesnoth-lib"
 
+#include "draw.hpp"
+#include "draw_manager.hpp"
 #include "gui/widgets/grid.hpp"
 #include "gui/widgets/settings.hpp"
 #include "gui/widgets/window.hpp"
@@ -22,6 +24,7 @@
 #include "gui/core/log.hpp"
 #include "gui/core/window_builder/helper.hpp"
 #include "sdl/rect.hpp"
+#include "video.hpp"
 
 namespace gui2
 {
@@ -41,14 +44,13 @@ widget::widget()
 	, last_best_size_()
 #endif
 	, linked_group_()
-	, is_dirty_(true)
 	, visible_(visibility::visible)
 	, redraw_action_(redraw_action::full)
 	, clipping_rectangle_()
 	, debug_border_mode_(debug_border::none)
 	, debug_border_color_(0,0,0,0)
 {
-	DBG_GUI_LF << "widget create: " << static_cast<void*>(this) << "\n";
+	DBG_GUI_LF << "widget create: " << static_cast<void*>(this);
 }
 
 widget::widget(const builder_widget& builder)
@@ -64,21 +66,20 @@ widget::widget(const builder_widget& builder)
 	, last_best_size_()
 #endif
 	, linked_group_(builder.linked_group)
-	, is_dirty_(true)
 	, visible_(visibility::visible)
 	, redraw_action_(redraw_action::full)
 	, clipping_rectangle_()
 	, debug_border_mode_(builder.debug_border_mode)
 	, debug_border_color_(builder.debug_border_color)
 {
-	DBG_GUI_LF << "widget create: " << static_cast<void*>(this) << "\n";
+	DBG_GUI_LF << "widget create: " << static_cast<void*>(this);
 }
 
 widget::~widget()
 {
 	DBG_GUI_LF
-	<< "widget destroy: " << static_cast<void*>(this) << " (id: " << id_
-	<< ")\n";
+	<< "widget destroy: " << static_cast<void*>(this)
+	<< " (id: " << id_ << ')';
 
 	widget* p = parent();
 	while(p) {
@@ -102,7 +103,7 @@ void widget::set_id(const std::string& id)
 	DBG_GUI_LF
 	<< "set id of " << static_cast<void*>(this) << " to '" << id << "' "
 	<< "(was '" << id_ << "'). Widget type: "
-	<< (this_ctrl ? this_ctrl->get_control_type() : typeid(widget).name()) << "\n";
+	<< (this_ctrl ? this_ctrl->get_control_type() : typeid(widget).name());
 
 	id_ = id;
 }
@@ -229,10 +230,11 @@ void widget::set_size(const point& size)
 	assert(size.x >= 0);
 	assert(size.y >= 0);
 
+	queue_redraw();
 	width_ = size.x;
 	height_ = size.y;
 
-	set_is_dirty(true);
+	queue_redraw();
 }
 
 void widget::place(const point& origin, const point& size)
@@ -240,13 +242,14 @@ void widget::place(const point& origin, const point& size)
 	assert(size.x >= 0);
 	assert(size.y >= 0);
 
+	queue_redraw();
 	x_ = origin.x;
 	y_ = origin.y;
 	width_ = size.x;
 	height_ = size.y;
 
 #if 0
-	std::cerr
+	PLAIN_LOG
 			<< "Id " << id()
 			<< " rect " << get_rectangle()
 			<< " parent "
@@ -257,7 +260,7 @@ void widget::place(const point& origin, const point& size)
 			<< ".\n";
 #endif
 
-	set_is_dirty(true);
+	queue_redraw();
 }
 
 void widget::move(const int x_offset, const int y_offset)
@@ -307,9 +310,9 @@ point widget::get_size() const
 	return point(width_, height_);
 }
 
-SDL_Rect widget::get_rectangle() const
+rect widget::get_rectangle() const
 {
-	return create_rect(get_origin(), get_size());
+	return {get_origin(), get_size()};
 }
 
 int widget::get_x() const
@@ -349,99 +352,86 @@ void widget::set_linked_group(const std::string& linked_group)
 
 /***** ***** ***** ***** Drawing functions. ***** ***** ***** *****/
 
-SDL_Rect widget::calculate_blitting_rectangle(const int x_offset,
-											   const int y_offset)
+SDL_Rect widget::calculate_blitting_rectangle() const
 {
-	SDL_Rect result = get_rectangle();
-	result.x += x_offset;
-	result.y += y_offset;
-	return result;
+	return get_rectangle();
 }
 
-SDL_Rect widget::calculate_clipping_rectangle(const int x_offset,
-											   const int y_offset)
+SDL_Rect widget::calculate_clipping_rectangle() const
 {
-	SDL_Rect result = clipping_rectangle_;
-	result.x += x_offset;
-	result.y += y_offset;
-	return result;
+	switch(get_drawing_action()) {
+	case redraw_action::none:
+		return sdl::empty_rect;
+	case redraw_action::partly:
+		return clipping_rectangle_;
+	case redraw_action::full:
+	default:
+		return get_rectangle();
+	}
 }
 
-void widget::draw_background(surface& frame_buffer, int x_offset, int y_offset)
+bool widget::draw_background()
 {
 	assert(visible_ == visibility::visible);
 
-	if(redraw_action_ == redraw_action::partly) {
-		const SDL_Rect clipping_rectangle
-				= calculate_clipping_rectangle(x_offset, y_offset);
-
-		clip_rect_setter clip(frame_buffer, &clipping_rectangle);
-		draw_debug_border(x_offset, y_offset);
-		impl_draw_background(frame_buffer, x_offset, y_offset);
-	} else {
-		draw_debug_border(x_offset, y_offset);
-		impl_draw_background(frame_buffer, x_offset, y_offset);
+	if(get_drawing_action() == redraw_action::none) {
+		return true;
 	}
+
+	// Set viewport and clip so we can draw in local coordinates.
+	rect dest = calculate_blitting_rectangle();
+	rect clip = calculate_clipping_rectangle();
+	// Presumably we are drawing to our window's render buffer.
+	point window_origin = get_window()->get_origin();
+	dest.shift(-window_origin);
+	auto view_setter = draw::set_viewport(dest);
+	clip.shift(-get_origin());
+	auto clip_setter = draw::reduce_clip(clip);
+
+	draw_debug_border();
+	return impl_draw_background();
 }
 
-void widget::draw_children(surface& frame_buffer, int x_offset, int y_offset)
+void widget::draw_children()
 {
 	assert(visible_ == visibility::visible);
-
-	if(redraw_action_ == redraw_action::partly) {
-		const SDL_Rect clipping_rectangle
-				= calculate_clipping_rectangle(x_offset, y_offset);
-
-		clip_rect_setter clip(frame_buffer, &clipping_rectangle);
-		impl_draw_children(frame_buffer, x_offset, y_offset);
-	} else {
-		impl_draw_children(frame_buffer, x_offset, y_offset);
-	}
-}
-
-void widget::draw_foreground(surface& frame_buffer, int x_offset, int y_offset)
-{
-	assert(visible_ == visibility::visible);
-
-	if(redraw_action_ == redraw_action::partly) {
-		const SDL_Rect clipping_rectangle
-				= calculate_clipping_rectangle(x_offset, y_offset);
-
-		clip_rect_setter clip(frame_buffer, &clipping_rectangle);
-		impl_draw_foreground(frame_buffer, x_offset, y_offset);
-	} else {
-		impl_draw_foreground(frame_buffer, x_offset, y_offset);
-	}
-}
-
-void widget::populate_dirty_list(window& caller,
-								  std::vector<widget*>& call_stack)
-{
-	assert(call_stack.empty() || call_stack.back() != this);
-
-	if(visible_ != visibility::visible) {
-		return;
-	}
 
 	if(get_drawing_action() == redraw_action::none) {
 		return;
 	}
 
-	call_stack.push_back(this);
-	if(is_dirty_) {
-		caller.add_to_dirty_list(call_stack);
-	} else {
-		// virtual function which only does something for container items.
-		child_populate_dirty_list(caller, call_stack);
-	}
+	// Set viewport and clip so we can draw in local coordinates.
+	rect dest = calculate_blitting_rectangle();
+	rect clip = calculate_clipping_rectangle();
+	// Presumably we are drawing to our window's render buffer.
+	point window_origin = get_window()->get_origin();
+	dest.shift(-window_origin);
+	auto view_setter = draw::set_viewport(dest);
+	clip.shift(-get_origin());
+	auto clip_setter = draw::reduce_clip(clip);
+
+	impl_draw_children();
 }
 
-void
-widget::child_populate_dirty_list(window& /*caller*/
-								   ,
-								   const std::vector<widget*>& /*call_stack*/)
+bool widget::draw_foreground()
 {
-	/* DO NOTHING */
+	assert(visible_ == visibility::visible);
+
+	if(get_drawing_action() == redraw_action::none) {
+		return true;
+	}
+
+	// Set viewport and clip so we can draw in local coordinates.
+	rect dest = calculate_blitting_rectangle();
+	rect clip = calculate_clipping_rectangle();
+	// Presumably we are drawing to our window's render buffer.
+	point window_origin = get_window()->get_origin();
+	dest.shift(-window_origin);
+	auto view_setter = draw::set_viewport(dest);
+	clip.shift(-get_origin());
+	auto clip_setter = draw::reduce_clip(clip);
+
+	return impl_draw_foreground();
 }
 
 SDL_Rect widget::get_dirty_rectangle() const
@@ -452,25 +442,30 @@ SDL_Rect widget::get_dirty_rectangle() const
 
 void widget::set_visible_rectangle(const SDL_Rect& rectangle)
 {
-	clipping_rectangle_ = sdl::intersect_rects(rectangle, get_rectangle());
+	clipping_rectangle_ = get_rectangle().intersect(rectangle);
 
 	if(clipping_rectangle_ == get_rectangle()) {
 		redraw_action_ = redraw_action::full;
-	} else if(clipping_rectangle_ == sdl::empty_rect) {
+	} else if(clipping_rectangle_.empty()) {
 		redraw_action_ = redraw_action::none;
 	} else {
 		redraw_action_ = redraw_action::partly;
 	}
 }
 
-void widget::set_is_dirty(const bool is_dirty)
+void widget::queue_redraw()
 {
-	is_dirty_ = is_dirty;
+	if (!width_ && !height_) {
+		// Do nothing if the widget hasn't yet been placed.
+		return;
+	}
+	queue_redraw(get_rectangle());
 }
 
-bool widget::get_is_dirty() const
+void widget::queue_redraw(const rect& region)
 {
-	return is_dirty_;
+	get_window()->queue_rerender(region);
+	draw_manager::invalidate_region(region);
 }
 
 void widget::set_visible(const visibility visible)
@@ -496,7 +491,7 @@ void widget::set_visible(const visibility visible)
 			}
 		}
 	} else {
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
@@ -523,32 +518,9 @@ void widget::set_debug_border_color(const color_t debug_border_color)
 
 void widget::draw_debug_border()
 {
-	SDL_Rect r = redraw_action_ == redraw_action::partly ? clipping_rectangle_
-														  : get_rectangle();
-
-	switch(debug_border_mode_) {
-		case debug_border::none:
-			/* DO NOTHING */
-			break;
-		case debug_border::outline:
-			sdl::draw_rectangle(r, debug_border_color_);
-			break;
-
-		case debug_border::fill:
-			sdl::fill_rectangle(r, debug_border_color_);
-			break;
-
-		default:
-			assert(false);
-	}
-}
-
-void
-widget::draw_debug_border(int x_offset, int y_offset)
-{
 	SDL_Rect r = redraw_action_ == redraw_action::partly
-						 ? calculate_clipping_rectangle(x_offset, y_offset)
-						 : calculate_blitting_rectangle(x_offset, y_offset);
+		? calculate_clipping_rectangle()
+		: calculate_blitting_rectangle();
 
 	switch(debug_border_mode_) {
 		case debug_border::none:
@@ -556,11 +528,11 @@ widget::draw_debug_border(int x_offset, int y_offset)
 			break;
 
 		case debug_border::outline:
-			sdl::draw_rectangle(r, debug_border_color_);
+			draw::rect(r, debug_border_color_);
 			break;
 
 		case debug_border::fill:
-			sdl::fill_rectangle(r, debug_border_color_);
+			draw::fill(r, debug_border_color_);
 			break;
 
 		default:
@@ -622,7 +594,7 @@ bool widget::is_at(const point& coordinate, const bool must_be_active) const
 		return false;
 	}
 
-	return sdl::point_in_rect(coordinate, get_rectangle());
+	return get_rectangle().contains(coordinate);
 }
 
 } // namespace gui2

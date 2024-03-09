@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2006 - 2021
+	Copyright (C) 2006 - 2024
 	by Joerg Hinrichs <joerg.hinrichs@alice-dsl.de>
 	Copyright (C) 2003 by David White <dave@whitevine.net>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
@@ -83,9 +83,9 @@ public:
 		const bool highlight = true,
 		const bool fire_event = true);
 
-	void move_action(bool browse);
+	void move_action(bool browse) override;
 
-	void touch_action(const map_location hex, bool browse);
+	void touch_action(const map_location hex, bool browse) override;
 
 	void select_or_action(bool browse);
 
@@ -119,20 +119,21 @@ protected:
 	 * Due to the way this class is constructed we can assume that the
 	 * display* gui_ member actually points to a game_display (derived class)
 	 */
-	game_display& gui() { return *gui_; }
+	game_display& gui() override { return *gui_; }
 	/** Const version */
-	const game_display& gui() const { return *gui_; }
+	const game_display& gui() const override { return *gui_; }
 
-	int drag_threshold() const;
+	int drag_threshold() const override;
 	/**
 	 * Use update to force an update of the mouse state.
 	 */
-	void mouse_motion(int x, int y, const bool browse, bool update=false, map_location loc = map_location::null_location());
-	bool right_click_show_menu(int x, int y, const bool browse);
+	void mouse_motion(int x, int y, const bool browse, bool update=false, map_location loc = map_location::null_location()) override;
+	bool mouse_button_event(const SDL_MouseButtonEvent& event, uint8_t button, map_location loc, bool click = false) override;
+	bool right_click_show_menu(int x, int y, const bool browse) override;
 //	bool left_click(int x, int y, const bool browse);
 	bool move_unit_along_current_route();
 
-	void touch_motion(int x, int y, const bool browse, bool update=false, map_location loc = map_location::null_location());
+	void touch_motion(int x, int y, const bool browse, bool update=false, map_location loc = map_location::null_location()) override;
 
 	void save_whiteboard_attack(const map_location& attacker_loc, const map_location& defender_loc, int weapon_choice);
 
@@ -160,6 +161,15 @@ private:
 	const team& viewing_team() const;
 	team &current_team();
 
+	// Some common code from mouse_motion and touch_motion.
+	/**
+	 * Highlight the hexes that a unit can move to.
+	 *
+	 * Based on the currently selected hex, selected unit and what's being moused-over,
+	 * conditionally draw any planned moves for the unit passed as an argument.
+	 */
+	void show_reach_for_unit(const unit_ptr& un);
+
 	game_display* gui_;
 	play_controller & pc_;
 
@@ -170,6 +180,10 @@ private:
 	map_location selected_hex_;
 	map_location next_unit_;
 	pathfind::marked_route current_route_;
+	/**
+	 * If non-empty, current_paths_.destinations contains a cache of highlighted
+	 * hexes, likely the movement range or attack range of a unit.
+	 */
 	pathfind::paths current_paths_;
 	bool unselected_paths_;
 	bool unselected_reach_;

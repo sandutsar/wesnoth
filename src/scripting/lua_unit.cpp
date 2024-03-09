@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2009 - 2021
+	Copyright (C) 2009 - 2024
 	by Guillaume Melquiond <guillaume.melquiond@gmail.com>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -31,8 +31,7 @@
 #include "game_version.hpp"
 #include "deprecation.hpp"
 
-#include "lua/lauxlib.h"
-#include "lua/lua.h"                    // for lua_State, lua_settop, etc
+#include "lua/wrapper_lauxlib.h"
 
 static lg::log_domain log_scripting_lua("scripting/lua");
 #define LOG_LUA LOG_STREAM(info, log_scripting_lua)
@@ -81,7 +80,7 @@ bool lua_unit::put_map(const map_location &loc)
 			ptr.reset();
 			uid = unit_it->underlying_id();
 		} else {
-			ERR_LUA << "Could not move unit " << ptr->underlying_id() << " onto map location " << loc << '\n';
+			ERR_LUA << "Could not move unit " << ptr->underlying_id() << " onto map location " << loc;
 			return false;
 		}
 	} else if (side) { // recall list
@@ -91,7 +90,7 @@ bool lua_unit::put_map(const map_location &loc)
 			// uid may be changed by unit_map on insertion
 			uid = resources::gameboard->units().replace(loc, it).first->underlying_id();
 		} else {
-			ERR_LUA << "Could not find unit " << uid << " on recall list of side " << side << '\n';
+			ERR_LUA << "Could not find unit " << uid << " on recall list of side " << side;
 			return false;
 		}
 	} else { // on map
@@ -104,7 +103,7 @@ bool lua_unit::put_map(const map_location &loc)
 			}
 			// No need to change our contents
 		} else {
-			ERR_LUA << "Could not find unit " << uid << " on the map" << std::endl;
+			ERR_LUA << "Could not find unit " << uid << " on the map";
 			return false;
 		}
 	}
@@ -337,7 +336,7 @@ static int impl_unit_get(lua_State *L)
 	return_vector_string_attrib("advances_to", u.advances_to());
 
 	if(strcmp(m, "alignment") == 0) {
-		lua_push(L, u.alignment());
+		lua_push(L, unit_alignments::get_string(u.alignment()));
 		return 1;
 	}
 
@@ -405,7 +404,7 @@ static int impl_unit_get(lua_State *L)
 	return_bool_attrib("zoc", u.get_emit_zoc());
 	return_string_attrib("facing", map_location::write_direction(u.facing()));
 	return_string_attrib("portrait", u.big_profile() == u.absolute_image()
-		? u.absolute_image() + u.image_mods() + "~XBRZ(2)"
+		? u.absolute_image() + u.image_mods() + "~SCALE_SHARP(144,144)"
 		: u.big_profile());
 	return_cfg_attrib("__cfg", u.write(cfg); u.get_location().write(cfg));
 
@@ -461,7 +460,7 @@ static int impl_unit_set(lua_State *L)
 	modify_vector_string_attrib("extra_recruit", u.set_recruits(value));
 	modify_vector_string_attrib("advances_to", u.set_advances_to(value));
 	if(strcmp(m, "alignment") == 0) {
-		u.set_alignment(lua_check<UNIT_ALIGNMENT>(L, 3));
+		u.set_alignment(lua_enum_check<unit_alignments>(L, 3));
 		return 0;
 	}
 

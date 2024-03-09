@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2008 - 2021
+	Copyright (C) 2008 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -23,6 +23,7 @@
 #include "gui/core/log.hpp"
 #include "gui/core/window_builder/helper.hpp"
 #include "sound.hpp"
+#include "wml_exception.hpp"
 
 #include <functional>
 
@@ -59,18 +60,18 @@ toggle_button::toggle_button(const implementation::builder_toggle_button& builde
 
 unsigned toggle_button::num_states() const
 {
-	std::div_t res = std::div(this->config()->state.size(), COUNT);
+	std::div_t res = std::div(this->get_config()->state.size(), COUNT);
 	assert(res.rem == 0);
 	assert(res.quot > 0);
 	return res.quot;
 }
 
-void toggle_button::set_members(const string_map& data)
+void toggle_button::set_members(const widget_item& data)
 {
 	// Inherit
 	styled_widget::set_members(data);
 
-	string_map::const_iterator itor = data.find("icon");
+	widget_item::const_iterator itor = data.find("icon");
 	if(itor != data.end()) {
 		set_icon_name(itor->second);
 	}
@@ -107,7 +108,7 @@ void toggle_button::update_canvas()
 		canvas.set_variable("icon", wfl::variant(icon_name_));
 	}
 
-	set_is_dirty(true);
+	queue_redraw();
 }
 
 void toggle_button::set_value(unsigned selected, bool fire_event)
@@ -117,7 +118,7 @@ void toggle_button::set_value(unsigned selected, bool fire_event)
 		return;
 	}
 	state_num_ = selected;
-	set_is_dirty(true);
+	queue_redraw();
 
 	// Check for get_window() is here to prevent the callback from
 	// being called when the initial value is set.
@@ -143,14 +144,14 @@ void toggle_button::set_state(const state_t state)
 {
 	if(state != state_) {
 		state_ = state;
-		set_is_dirty(true);
+		queue_redraw();
 	}
 }
 
 void toggle_button::signal_handler_mouse_enter(const event::ui_event event,
 												bool& handled)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 	set_state(FOCUSED);
 	handled = true;
 }
@@ -158,7 +159,7 @@ void toggle_button::signal_handler_mouse_enter(const event::ui_event event,
 void toggle_button::signal_handler_mouse_leave(const event::ui_event event,
 												bool& handled)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 	set_state(ENABLED);
 	handled = true;
 }
@@ -166,7 +167,7 @@ void toggle_button::signal_handler_mouse_leave(const event::ui_event event,
 void toggle_button::signal_handler_left_button_click(const event::ui_event event,
 													  bool& handled)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	sound::play_UI_sound(settings::sound_toggle_button_click);
 
@@ -178,7 +179,7 @@ void toggle_button::signal_handler_left_button_click(const event::ui_event event
 void toggle_button::signal_handler_left_button_double_click(
 		const event::ui_event event, bool& handled)
 {
-	DBG_GUI_E << LOG_HEADER << ' ' << event << ".\n";
+	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
 
 	if(retval_ == retval::NONE) {
 		return;
@@ -197,7 +198,7 @@ void toggle_button::signal_handler_left_button_double_click(
 toggle_button_definition::toggle_button_definition(const config& cfg)
 	: styled_widget_definition(cfg)
 {
-	DBG_GUI_P << "Parsing toggle button " << id << '\n';
+	DBG_GUI_P << "Parsing toggle button " << id;
 
 	load_resolutions<resolution>(cfg);
 }
@@ -209,9 +210,9 @@ toggle_button_definition::resolution::resolution(const config& cfg)
 	// toggle_button.hpp.
 	for(const auto& c : cfg.child_range("state"))
 	{
-		state.emplace_back(c.child("enabled"));
-		state.emplace_back(c.child("disabled"));
-		state.emplace_back(c.child("focused"));
+		state.emplace_back(VALIDATE_WML_CHILD(c, "enabled", missing_mandatory_wml_tag("toggle_button_definition][resolution][state", "enabled")));
+		state.emplace_back(VALIDATE_WML_CHILD(c, "disabled", missing_mandatory_wml_tag("toggle_button_definition][resolution][state", "disabled")));
+		state.emplace_back(VALIDATE_WML_CHILD(c, "focused", missing_mandatory_wml_tag("toggle_button_definition][resolution][state", "focused")));
 	}
 }
 
@@ -228,15 +229,15 @@ builder_toggle_button::builder_toggle_button(const config& cfg)
 {
 }
 
-widget* builder_toggle_button::build() const
+std::unique_ptr<widget> builder_toggle_button::build() const
 {
-	toggle_button* widget = new toggle_button(*this);
+	auto widget = std::make_unique<toggle_button>(*this);
 
 	widget->set_icon_name(icon_name_);
 	widget->set_retval(get_retval(retval_id_, retval_, id));
 
 	DBG_GUI_G << "Window builder: placed toggle button '" << id
-			  << "' with definition '" << definition << "'.\n";
+			  << "' with definition '" << definition << "'.";
 
 	return widget;
 }

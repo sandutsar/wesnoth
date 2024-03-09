@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2010 - 2021
+	Copyright (C) 2010 - 2024
 	by Mark de Wever <koraq@xs4all.nl>
 	Part of the Battle for Wesnoth Project https://www.wesnoth.org/
 
@@ -16,14 +16,11 @@
 #define GETTEXT_DOMAIN "wesnoth-lib"
 
 #include "gui/widgets/drawing.hpp"
-
 #include "gui/core/widget_definition.hpp"
-#include "gui/core/window_builder.hpp"
-
 #include "gui/core/register_widget.hpp"
-#include "gui/widgets/settings.hpp"
 
-#include <functional>
+#include "gettext.hpp"
+#include "wml_exception.hpp"
 
 namespace gui2
 {
@@ -87,7 +84,7 @@ bool drawing::disable_click_dismiss() const
 drawing_definition::drawing_definition(const config& cfg)
 	: styled_widget_definition(cfg)
 {
-	DBG_GUI_P << "Parsing drawing " << id << '\n';
+	DBG_GUI_P << "Parsing drawing " << id;
 
 	load_resolutions<resolution>(cfg);
 }
@@ -113,14 +110,14 @@ builder_drawing::builder_drawing(const config& cfg)
 	: builder_styled_widget(cfg)
 	, width(cfg["width"])
 	, height(cfg["height"])
-	, draw(cfg.child("draw"))
+	, draw(VALIDATE_WML_CHILD(cfg, "draw", missing_mandatory_wml_tag("drawing", "draw")))
 {
 	assert(!draw.empty());
 }
 
-widget* builder_drawing::build() const
+std::unique_ptr<widget> builder_drawing::build() const
 {
-	drawing* widget = new drawing(*this);
+	auto widget = std::make_unique<drawing>(*this);
 
 	const wfl::map_formula_callable& size = get_screen_size_variables();
 
@@ -134,7 +131,7 @@ widget* builder_drawing::build() const
 	widget->set_drawing_data(draw);
 
 	DBG_GUI_G << "Window builder: placed drawing '" << id
-			  << "' with definition '" << definition << "'.\n";
+			  << "' with definition '" << definition << "'.";
 
 	return widget;
 }
